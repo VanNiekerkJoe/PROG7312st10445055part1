@@ -1,0 +1,28 @@
+<div class="panel zone-list">
+    <p class="panel-title">Zones</p>
+    @foreach (var zone in Zones)
+    {
+        <div class="zone-row @SeverityClass(zone.WorstSeverity) @(zone.Name == ActiveZone ? "zone-row-active" : "")"
+             @onclick="() => OnZoneSelected.InvokeAsync(zone.Name)">
+            <span>@zone.Name</span>
+            @if (zone.WorstSeverity == AnomalySeverity.Anomalous)
+            {
+                <span class="zone-warning">⚠</span>
+            }
+        </div>
+    }
+</div>
+@code {
+    [Parameter, EditorRequired] public List<ZoneSummary> Zones { get; set; } = [];
+    [Parameter] public EventCallback<string> OnZoneSelected { get; set; }
+    [Parameter] public string? ActiveZone { get; set; }
+
+    private static string SeverityClass(AnomalySeverity severity) => severity switch
+    {
+        AnomalySeverity.Anomalous => "zone-danger",
+        AnomalySeverity.Disconnected => "zone-disconnected",
+        AnomalySeverity.Elevated => "zone-warning-bg",
+        _ => ""
+    };
+    public sealed record ZoneSummary(string Name, AnomalySeverity WorstSeverity);
+}

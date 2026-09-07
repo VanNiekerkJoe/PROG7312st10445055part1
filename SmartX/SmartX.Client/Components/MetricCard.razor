@@ -1,0 +1,10 @@
+<div class="metric-card">
+    <p class="metric-label">@Label</p>
+    <p class="metric-value @ValueClass">@Value</p>
+</div>
+
+@code {
+    [Parameter, EditorRequired] public string Label { get; set; } = "";
+    [Parameter, EditorRequired] public string Value { get; set; } = "";
+    [Parameter] public string ValueClass { get; set; } = "";
+}

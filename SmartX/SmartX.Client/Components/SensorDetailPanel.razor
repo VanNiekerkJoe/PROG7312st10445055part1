@@ -1,0 +1,108 @@
+<div class="panel detail-panel">
+    <p class="panel-title">Selected node</p>
+
+    @if (Selected is null)
+    {
+        <p class="detail-empty">Click a node in the constellation to inspect it.</p>
+    }
+    else
+    {
+        <h3>@Selected.DeviceId</h3>
+        <p class="detail-severity @SeverityClass(Selected.Severity)">@Selected.Severity</p>
+
+        <table class="detail-table">
+            <tbody>
+                <tr><td>Zone</td><td>@Selected.ZoneName</td></tr>
+                <tr><td>Category</td><td>@Selected.Category</td></tr>
+                <tr><td>Reading</td><td>@Selected.LastValue.ToString("0.##")</td></tr>
+                <tr><td>z-score</td><td class="@SeverityClass(Selected.Severity)">@Selected.ZScore.ToString("0.##")</td></tr>
+                <tr><td>Throughput</td><td>@Selected.ThroughputLastMinute /min</td></tr>
+            </tbody>
+        </table>
+
+        <label class="attachment-input">
+            Attach config / log / photo
+            <InputFile OnChange="OnFileSelected" />
+        </label>
+        @if (_uploading)
+        {
+            <p class="upload-status"><span class="spinner spinner-inline"></span> Uploading…</p>
+        }
+        else if (!string.IsNullOrEmpty(_uploadError))
+        {
+            <p class="upload-status upload-error">@_uploadError</p>
+        }
+
+        @if (_attachments.Count > 0)
+        {
+            <ul class="attachment-list">
+                @foreach (var name in _attachments)
+                {
+                    <li>📎 @name</li>
+                }
+            </ul>
+        }
+    }
+</div>
+
+@code {
+    [Parameter] public DeviceStatus? Selected { get; set; }
+    [Parameter] public TelemetryApiClient? ApiClient { get; set; }
+
+    private bool _uploading;
+    private string? _uploadError;
+    private string? _lastDeviceId;
+    private readonly List<string> _attachments = [];
+
+    protected override void OnParametersSet()
+    {
+        // Reset the session-local attachment list whenever the selection changes
+        // to a different device, so it doesn't carry over from the last one.
+        if (Selected?.DeviceId != _lastDeviceId)
+        {
+            _lastDeviceId = Selected?.DeviceId;
+            _attachments.Clear();
+            _uploadError = null;
+        }
+    }
+
+    private async Task OnFileSelected(InputFileChangeEventArgs e)
+    {
+        if (Selected is null || ApiClient is null) return;
+
+        _uploading = true;
+        _uploadError = null;
+        StateHasChanged();
+
+        try
+        {
+            await using var stream = e.File.OpenReadStream(maxAllowedSize: 10 * 1024 * 1024);
+            var ok = await ApiClient.UploadAttachmentAsync(Selected.DeviceId, stream, e.File.Name);
+            if (ok)
+            {
+                _attachments.Add(e.File.Name);
+            }
+            else
+            {
+                _uploadError = "Upload failed, please try again.";
+            }
+        }
+        catch (Exception)
+        {
+            _uploadError = "Upload failed, please try again.";
+        }
+        finally
+        {
+            _uploading = false;
+        }
+    }
+
+    private static string SeverityClass(AnomalySeverity severity) => severity switch
+    {
+        AnomalySeverity.Healthy => "sev-healthy",
+        AnomalySeverity.Elevated => "sev-elevated",
+        AnomalySeverity.Anomalous => "sev-anomalous",
+        AnomalySeverity.Disconnected => "sev-disconnected",
+        _ => ""
+    };
+}

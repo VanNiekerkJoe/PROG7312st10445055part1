@@ -1,0 +1,138 @@
+@page "/ingestion"
+@using SmartX.Client.Components
+@inject TelemetryApiClient Api
+@inject TelemetryHubClient Hub
+@implements IAsyncDisposable
+<div class="dashboard">
+    <header class="dashboard-header">
+        <div class="brand"><span class="logo-mark">◈</span> Smart-X gateway</div>
+        <nav class="pillar-pills">
+            <a href="/ingestion" class="pill pill-active">Sensor ingestion</a>
+            <span class="pill pill-disabled">Command stream</span>
+            <span class="pill pill-disabled">Mesh topology</span>
+        </nav>
+        @* DEV-ONLY: delete this button + LoadTestNodes() before submission *@
+        <button class="test-data-btn" @onclick="LoadTestNodes">+ Test nodes</button>
+    </header>
+    <div class="metric-row">
+        <MetricCard Label="Active sensors" Value="@_activeSensors.ToString()" />
+        <MetricCard Label="Anomalies, 1h" Value="@_anomalyCount.ToString()" ValueClass="sev-anomalous-text" />
+        <MetricCard Label="Disconnected" Value="@_disconnectedCount.ToString()" ValueClass="sev-disconnected-text" />
+        <MetricCard Label="Throughput" Value="@($"{_throughputPerMinute}/min")" />
+    </div>
+    @if (_highlightZone is not null)
+    {
+        <div class="filter-chip">
+            Filtered: @_highlightZone
+            <span class="filter-clear" @onclick="() => _highlightZone = null">✕ clear</span>
+        </div>
+    }
+    <div class="main-grid">
+        <ZoneList Zones="_zoneSummaries" OnZoneSelected="OnZoneClicked" ActiveZone="_highlightZone" />
+        <div class="panel constellation-panel">
+            <p class="panel-title">Anomaly constellation</p>
+            <ConstellationView Devices="_devices" OnDeviceSelected="OnDeviceSelected"
+                                SelectedDeviceId="_selected?.DeviceId" HighlightZone="_highlightZone" />
+        </div>
+        <SensorDetailPanel Selected="_selected" ApiClient="Api" />
+    </div>
+    <AlertTimeline Events="_alertEvents" />
+</div>
+@code {
+    private readonly Dictionary<string, DeviceStatus> _statusByDevice = new();
+    private readonly List<AlertTimeline.AlertEvent> _alertEvents = [];
+    private const int MaxAlertEvents = 40;
+    private List<DeviceStatus> _devices = [];
+    private List<ZoneList.ZoneSummary> _zoneSummaries = [];
+    private DeviceStatus? _selected;
+    private string? _highlightZone;
+    private int _activeSensors;
+    private int _anomalyCount;
+    private int _disconnectedCount;
+    private int _throughputPerMinute;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var initial = await Api.GetAllStatusesAsync();
+        foreach (var status in initial)
+        {
+            _statusByDevice[status.DeviceId] = status;
+        }
+        Recompute();
+        Hub.StatusUpdated += OnStatusUpdated;
+        await Hub.EnsureStartedAsync();
+    }
+
+    private void OnStatusUpdated(DeviceStatus status)
+    {
+        _statusByDevice[status.DeviceId] = status;
+        if (status.Severity is AnomalySeverity.Anomalous or AnomalySeverity.Elevated or AnomalySeverity.Disconnected)
+        {
+            _alertEvents.Add(new AlertTimeline.AlertEvent(status.DeviceId, status.Severity, status.LastSeen));
+            if (_alertEvents.Count > MaxAlertEvents)
+            {
+                _alertEvents.RemoveAt(0);
+            }
+        }
+        Recompute();
+        InvokeAsync(StateHasChanged);
+    }
+
+    private void Recompute()
+    {
+        _devices = _statusByDevice.Values.ToList();
+        _activeSensors = _devices.Count;
+        _anomalyCount = _devices.Count(d => d.Severity == AnomalySeverity.Anomalous);
+        _disconnectedCount = _devices.Count(d => d.Severity == AnomalySeverity.Disconnected);
+        _throughputPerMinute = _devices.Sum(d => d.ThroughputLastMinute);
+        _zoneSummaries = _devices
+            .GroupBy(d => d.ZoneName)
+            .Select(g => new ZoneList.ZoneSummary(g.Key, g.Max(d => d.Severity)))
+            .OrderBy(z => z.Name)
+            .ToList();
+        if (_selected is not null && _statusByDevice.TryGetValue(_selected.DeviceId, out var refreshed))
+        {
+            _selected = refreshed;
+        }
+    }
+
+    private void OnDeviceSelected(DeviceStatus device) => _selected = device;
+    private void OnZoneClicked(string zoneName) => _highlightZone = _highlightZone == zoneName ? null : zoneName;
+
+    // DEV-ONLY: populates the scope with a fixed, varied set of fake devices so you can see
+    // every severity state, multiple zones, and the interactions (click, lock-on, filters,
+    // zone highlight) without the API/SignalR seeder running. Safe to delete before submission.
+    private void LoadTestNodes()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var testDevices = new[]
+        {
+            new DeviceStatus { DeviceId = "A1-TEMP-01", ZoneName = "Zone A", Category = "Temperature", Severity = AnomalySeverity.Healthy,      LastValue = 22.4,  ZScore = 0.3,  ThroughputLastMinute = 12, LastSeen = now },
+            new DeviceStatus { DeviceId = "A1-TEMP-02", ZoneName = "Zone A", Category = "Temperature", Severity = AnomalySeverity.Healthy,      LastValue = 21.9,  ZScore = 0.1,  ThroughputLastMinute = 11, LastSeen = now },
+            new DeviceStatus { DeviceId = "A2-HUM-01",  ZoneName = "Zone A", Category = "Humidity",    Severity = AnomalySeverity.Elevated,     LastValue = 68.2,  ZScore = 1.9,  ThroughputLastMinute = 9,  LastSeen = now },
+            new DeviceStatus { DeviceId = "B1-PRES-01", ZoneName = "Zone B", Category = "Pressure",    Severity = AnomalySeverity.Healthy,      LastValue = 101.3, ZScore = 0.2,  ThroughputLastMinute = 14, LastSeen = now },
+            new DeviceStatus { DeviceId = "B1-PRES-02", ZoneName = "Zone B", Category = "Pressure",    Severity = AnomalySeverity.Anomalous,    LastValue = 87.1,  ZScore = 4.6,  ThroughputLastMinute = 3,  LastSeen = now },
+            new DeviceStatus { DeviceId = "B2-VIB-01",  ZoneName = "Zone B", Category = "Vibration",   Severity = AnomalySeverity.Elevated,     LastValue = 4.7,   ZScore = 2.1,  ThroughputLastMinute = 10, LastSeen = now },
+            new DeviceStatus { DeviceId = "B2-VIB-02",  ZoneName = "Zone B", Category = "Vibration",   Severity = AnomalySeverity.Healthy,      LastValue = 1.2,   ZScore = 0.4,  ThroughputLastMinute = 13, LastSeen = now },
+            new DeviceStatus { DeviceId = "C1-FLOW-01", ZoneName = "Zone C", Category = "Flow rate",   Severity = AnomalySeverity.Disconnected, LastValue = 0.0,   ZScore = 0.0,  ThroughputLastMinute = 0,  LastSeen = now.AddMinutes(-14) },
+            new DeviceStatus { DeviceId = "C1-FLOW-02", ZoneName = "Zone C", Category = "Flow rate",   Severity = AnomalySeverity.Healthy,      LastValue = 5.3,   ZScore = 0.6,  ThroughputLastMinute = 12, LastSeen = now },
+            new DeviceStatus { DeviceId = "C2-TEMP-01", ZoneName = "Zone C", Category = "Temperature", Severity = AnomalySeverity.Anomalous,    LastValue = 41.8,  ZScore = 5.2,  ThroughputLastMinute = 2,  LastSeen = now },
+            new DeviceStatus { DeviceId = "C2-TEMP-02", ZoneName = "Zone C", Category = "Temperature", Severity = AnomalySeverity.Healthy,      LastValue = 23.1,  ZScore = 0.2,  ThroughputLastMinute = 11, LastSeen = now },
+            new DeviceStatus { DeviceId = "C3-HUM-01",  ZoneName = "Zone C", Category = "Humidity",    Severity = AnomalySeverity.Disconnected, LastValue = 0.0,   ZScore = 0.0,  ThroughputLastMinute = 0,  LastSeen = now.AddMinutes(-31) },
+            new DeviceStatus { DeviceId = "A3-CO2-01",  ZoneName = "Zone A", Category = "CO2",         Severity = AnomalySeverity.Healthy,      LastValue = 612,   ZScore = 0.5,  ThroughputLastMinute = 10, LastSeen = now },
+            new DeviceStatus { DeviceId = "A3-CO2-02",  ZoneName = "Zone A", Category = "CO2",         Severity = AnomalySeverity.Elevated,     LastValue = 940,   ZScore = 2.3,  ThroughputLastMinute = 8,  LastSeen = now },
+        };
+
+        foreach (var device in testDevices)
+        {
+            _statusByDevice[device.DeviceId] = device;
+        }
+        Recompute();
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        Hub.StatusUpdated -= OnStatusUpdated;
+        await ValueTask.CompletedTask;
+    }
+}

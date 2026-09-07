@@ -1,0 +1,172 @@
+@using System.Globalization
+
+@if (Devices.Count == 0)
+{
+    <svg viewBox="0 0 360 220" class="constellation-svg">
+        <circle cx="180" cy="110" r="35" class="radar-ring" />
+        <circle cx="180" cy="110" r="65" class="radar-ring" />
+        <circle cx="180" cy="110" r="95" class="radar-ring" />
+        <line x1="80" y1="110" x2="280" y2="110" class="radar-crosshair" />
+        <line x1="180" y1="10" x2="180" y2="210" class="radar-crosshair" />
+        @for (var i = 0; i < 12; i++)
+        {
+            var deg = i * 30.0;
+            var rad = deg * Math.PI / 180.0;
+            var tx1 = 180 + 90 * Math.Cos(rad);
+            var ty1 = 110 + 90 * Math.Sin(rad);
+            var tx2 = 180 + 98 * Math.Cos(rad);
+            var ty2 = 110 + 98 * Math.Sin(rad);
+            <line x1="@(F(tx1))" y1="@(F(ty1))" x2="@(F(tx2))" y2="@(F(ty2))" class="radar-tick" />
+        }
+        <g class="radar-sweep-group">
+            <path d="M180,110 L280,110 A100,100 0 0 1 244.3,186.6 Z" class="radar-sweep-fill" />
+            <line x1="180" y1="110" x2="280" y2="110" class="radar-sweep-edge" />
+        </g>
+        <text x="180" y="140" class="constellation-empty-text">AWAITING SIGNAL</text>
+        <text x="8" y="208" class="hud-readout">CONTACTS 0</text>
+        <circle cx="180" cy="110" r="16" class="hub" />
+        <text x="180" y="113" class="hub-label">GW</text>
+    </svg>
+}
+else
+{
+    <svg viewBox="0 0 360 220" class="constellation-svg">
+        <circle cx="180" cy="110" r="35" class="radar-ring" />
+        <circle cx="180" cy="110" r="65" class="radar-ring" />
+        <circle cx="180" cy="110" r="95" class="radar-ring" />
+        <line x1="80" y1="110" x2="280" y2="110" class="radar-crosshair" />
+        <line x1="180" y1="10" x2="180" y2="210" class="radar-crosshair" />
+        @for (var i = 0; i < 12; i++)
+        {
+            var deg = i * 30.0;
+            var rad = deg * Math.PI / 180.0;
+            var tx1 = 180 + 90 * Math.Cos(rad);
+            var ty1 = 110 + 90 * Math.Sin(rad);
+            var tx2 = 180 + 98 * Math.Cos(rad);
+            var ty2 = 110 + 98 * Math.Sin(rad);
+            <line x1="@(F(tx1))" y1="@(F(ty1))" x2="@(F(tx2))" y2="@(F(ty2))" class="radar-tick" />
+        }
+        <g class="radar-sweep-group">
+            <path d="M180,110 L280,110 A100,100 0 0 1 244.3,186.6 Z" class="radar-sweep-fill" />
+            <line x1="180" y1="110" x2="280" y2="110" class="radar-sweep-edge" />
+        </g>
+
+        @foreach (var (device, point) in Layout)
+        {
+            <line x1="180" y1="110" x2="@(F(point.X))" y2="@(F(point.Y))"
+                  class="constellation-edge @(IsDimmed(device) ? "dimmed" : "")" />
+        }
+
+        @foreach (var (device, point) in Layout)
+        {
+            <g class="node-group @(IsDimmed(device) ? "dimmed" : "")"
+               @onclick="() => OnDeviceSelected.InvokeAsync(device)">
+
+                @if (device.Severity == AnomalySeverity.Anomalous)
+                {
+                    <circle cx="@(F(point.X))" cy="@(F(point.Y))" r="8" class="anomaly-ring" />
+                }
+                @if (device.DeviceId == SelectedDeviceId)
+                {
+                    <circle cx="@(F(point.X))" cy="@(F(point.Y))" r="@(point.Radius + 6)" class="lockon-ring" />
+                }
+
+                <circle cx="@(F(point.X))" cy="@(F(point.Y))" r="@(point.Radius + 3)"
+                        class="detect-flash" style="animation-delay:@(F(point.PingDelaySeconds))s" />
+
+                <circle cx="@(F(point.X))" cy="@(F(point.Y))" r="@(point.Radius + 7)" class="node-hit" />
+
+                <circle cx="@(F(point.X))" cy="@(F(point.Y))" r="@point.Radius"
+                        class="node @SeverityClass(device.Severity)">
+                    <title>@device.DeviceId (@device.ZoneName): @device.LastValue.ToString("0.##")</title>
+                </circle>
+
+                <text x="@(F(point.X))" y="@(F(point.Y - point.Radius - 7))" class="node-tooltip">@device.DeviceId</text>
+            </g>
+        }
+
+        <text x="8" y="200" class="hud-readout">CONTACTS @Devices.Count</text>
+        <text x="8" y="211" class="hud-readout sev-anomalous-text">ANOMALIES @Devices.Count(d => d.Severity == AnomalySeverity.Anomalous)</text>
+
+        <circle cx="180" cy="110" r="16" class="hub" />
+        <text x="180" y="113" class="hub-label">GW</text>
+    </svg>
+}
+
+<div class="constellation-legend">
+    <span class="legend-item @(_hiddenSeverities.Contains(AnomalySeverity.Healthy) ? "legend-off" : "")"
+          @onclick="() => ToggleSeverity(AnomalySeverity.Healthy)">
+        <i class="dot sev-healthy"></i> Healthy
+    </span>
+    <span class="legend-item @(_hiddenSeverities.Contains(AnomalySeverity.Elevated) ? "legend-off" : "")"
+          @onclick="() => ToggleSeverity(AnomalySeverity.Elevated)">
+        <i class="dot sev-elevated"></i> Elevated
+    </span>
+    <span class="legend-item @(_hiddenSeverities.Contains(AnomalySeverity.Anomalous) ? "legend-off" : "")"
+          @onclick="() => ToggleSeverity(AnomalySeverity.Anomalous)">
+        <i class="dot sev-anomalous"></i> Anomalous
+    </span>
+    <span class="legend-item @(_hiddenSeverities.Contains(AnomalySeverity.Disconnected) ? "legend-off" : "")"
+          @onclick="() => ToggleSeverity(AnomalySeverity.Disconnected)">
+        <i class="dot sev-disconnected"></i> Disconnected
+    </span>
+</div>
+
+@code {
+    [Parameter, EditorRequired] public List<DeviceStatus> Devices { get; set; } = [];
+    [Parameter] public EventCallback<DeviceStatus> OnDeviceSelected { get; set; }
+    [Parameter] public string? SelectedDeviceId { get; set; }
+    [Parameter] public string? HighlightZone { get; set; }
+
+    private const double SweepDurationSeconds = 6.0;
+    private readonly HashSet<AnomalySeverity> _hiddenSeverities = [];
+
+    private List<(DeviceStatus Device, NodePoint Point)> Layout =>
+        Devices
+            .OrderBy(d => d.DeviceId, StringComparer.Ordinal)
+            .Select((device, index) => (device, ComputePoint(device, index, Devices.Count)))
+            .ToList();
+
+    private static NodePoint ComputePoint(DeviceStatus device, int index, int total)
+    {
+        var angle = total == 0 ? 0 : index * (2 * Math.PI / total);
+        var angleDeg = angle * 180.0 / Math.PI;
+        var radiusFromHub = 35 + Math.Abs(device.DeviceId.GetHashCode()) % 60;
+        var x = 180 + radiusFromHub * Math.Cos(angle);
+        var y = 110 + radiusFromHub * Math.Sin(angle);
+        var nodeRadius = device.Severity switch
+        {
+            AnomalySeverity.Anomalous => 7,
+            AnomalySeverity.Elevated => 6,
+            AnomalySeverity.Disconnected => 5,
+            _ => 5
+        };
+        var pingDelay = angleDeg / 360.0 * SweepDurationSeconds;
+        return new NodePoint(x, y, nodeRadius, pingDelay);
+    }
+
+    private bool IsDimmed(DeviceStatus device) =>
+        _hiddenSeverities.Contains(device.Severity) ||
+        (HighlightZone is not null && device.ZoneName != HighlightZone);
+
+    private void ToggleSeverity(AnomalySeverity severity)
+    {
+        if (!_hiddenSeverities.Add(severity))
+        {
+            _hiddenSeverities.Remove(severity);
+        }
+    }
+
+    private static string F(double v) => v.ToString("0.##", CultureInfo.InvariantCulture);
+
+    private static string SeverityClass(AnomalySeverity severity) => severity switch
+    {
+        AnomalySeverity.Healthy => "sev-healthy",
+        AnomalySeverity.Elevated => "sev-elevated",
+        AnomalySeverity.Anomalous => "sev-anomalous",
+        AnomalySeverity.Disconnected => "sev-disconnected",
+        _ => ""
+    };
+
+    private readonly record struct NodePoint(double X, double Y, int Radius, double PingDelaySeconds);
+}

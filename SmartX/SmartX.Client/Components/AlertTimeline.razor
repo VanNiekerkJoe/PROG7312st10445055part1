@@ -1,0 +1,31 @@
+<div class="panel timeline-panel">
+    <p class="panel-title">Alert timeline, last hour</p>
+    @if (Events.Count == 0)
+    {
+        <p class="zone-empty">No alerts yet, all sensors nominal.</p>
+    }
+    <svg viewBox="0 0 640 46" class="timeline-svg">
+        <line x1="0" y1="23" x2="640" y2="23" class="timeline-baseline" />
+        @for (var i = 0; i < Events.Count; i++)
+        {
+            var evt = Events[i];
+            var x = 10 + i * (620.0 / Math.Max(1, Events.Count - 1));
+            var (up, down, cssClass) = evt.Severity switch
+            {
+                AnomalySeverity.Anomalous => (19.0, 19.0, "tick-anomalous"),
+                AnomalySeverity.Elevated => (11.0, 11.0, "tick-elevated"),
+                AnomalySeverity.Disconnected => (5.0, 5.0, "tick-disconnected"),
+                _ => (5.0, 5.0, "tick-healthy")
+            };
+            <line x1="@x" y1="@(23 - up)" x2="@x" y2="@(23 + down)" class="timeline-tick @cssClass">
+                <title>@evt.DeviceId: @evt.Severity at @evt.Timestamp.ToLocalTime().ToString("HH:mm:ss")</title>
+            </line>
+        }
+    </svg>
+</div>
+
+@code {
+    [Parameter, EditorRequired] public List<AlertEvent> Events { get; set; } = [];
+
+    public sealed record AlertEvent(string DeviceId, AnomalySeverity Severity, DateTimeOffset Timestamp);
+}

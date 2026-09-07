@@ -1,0 +1,16 @@
+services:
+  smartx-api:
+    build:
+      context: .
+      dockerfile: SmartX.Api/Dockerfile
+    ports:
+      - "8080:8080"
+
+  smartx-client:
+    build:
+      context: .
+      dockerfile: SmartX.Client/Dockerfile
+    ports:
+      - "8081:80"
+    depends_on:
+      - smartx-api
