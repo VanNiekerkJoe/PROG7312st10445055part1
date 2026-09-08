@@ -11,6 +11,9 @@
             <span class="pill pill-disabled">Command stream</span>
             <span class="pill pill-disabled">Mesh topology</span>
         </nav>
+        <button class="registration-toggle-btn" @onclick="() => _showRegistrationForm = !_showRegistrationForm">
+            + Register sensor
+        </button>
         @* DEV-ONLY: delete this button + LoadTestNodes() before submission *@
         <button class="test-data-btn" @onclick="LoadTestNodes">+ Test nodes</button>
     </header>
@@ -20,6 +23,10 @@
         <MetricCard Label="Disconnected" Value="@_disconnectedCount.ToString()" ValueClass="sev-disconnected-text" />
         <MetricCard Label="Throughput" Value="@($"{_throughputPerMinute}/min")" />
     </div>
+    @if (_showRegistrationForm)
+    {
+        <DeviceRegistrationForm ApiClient="Api" OnClose="() => _showRegistrationForm = false" OnRegistered="() => _showRegistrationForm = false" />
+    }
     @if (_highlightZone is not null)
     {
         <div class="filter-chip">
@@ -46,6 +53,7 @@
     private List<ZoneList.ZoneSummary> _zoneSummaries = [];
     private DeviceStatus? _selected;
     private string? _highlightZone;
+    private bool _showRegistrationForm;
     private int _activeSensors;
     private int _anomalyCount;
     private int _disconnectedCount;
@@ -102,7 +110,7 @@
     // DEV-ONLY: populates the scope with a fixed, varied set of fake devices so you can see
     // every severity state, multiple zones, and the interactions (click, lock-on, filters,
     // zone highlight) without the API/SignalR seeder running. Safe to delete before submission.
-        private void LoadTestNodes()
+    private void LoadTestNodes()
     {
         var now = DateTimeOffset.UtcNow;
         var testDevices = new[]

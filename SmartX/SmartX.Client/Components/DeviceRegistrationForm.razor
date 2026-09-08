@@ -1,0 +1,142 @@
+﻿@using SmartX.Client.Services
+@using SmartX.Core.Telemetry
+
+<div class="panel registration-panel">
+    <div class="registration-header">
+        <p class="panel-title">Register new sensor</p>
+        <span class="form-close" @onclick="() => OnClose.InvokeAsync()">✕</span>
+    </div>
+
+    @if (_subZones.Count == 0)
+    {
+        <p class="detail-empty">Loading deployment tree…</p>
+    }
+    else
+    {
+        <div class="form-field">
+            <label class="form-label">Sub-zone</label>
+            <select class="form-select" @bind="_selectedSubZoneId">
+                <option value="">-- select --</option>
+                @foreach (var (id, path) in _subZones)
+                {
+                    <option value="@id">@path</option>
+                }
+            </select>
+        </div>
+
+        <div class="form-field">
+            <label class="form-label">MAC address</label>
+            <input class="form-input" @bind="_macAddress" placeholder="AA:BB:CC:00:11:22" />
+        </div>
+
+        <div class="form-field">
+            <label class="form-label">Category</label>
+            <select class="form-select" @bind="_category">
+                @foreach (var cat in Enum.GetValues<SensorCategory>())
+                {
+                    <option value="@cat">@cat</option>
+                }
+            </select>
+        </div>
+
+        <div class="form-field">
+            <label class="form-label">Deployment location</label>
+            <input class="form-input" @bind="_locationDescription" placeholder="e.g. Greenhouse 2 / Zone B" />
+        </div>
+
+        <div class="form-actions">
+            <button class="form-submit" @onclick="Submit" disabled="@_submitting">
+                @(_submitting ? "Registering…" : "Register device")
+            </button>
+        </div>
+
+        @if (_message is not null)
+        {
+            <div class="form-message @(_success ? "form-message-success" : "form-message-error")">
+                @_message
+            </div>
+        }
+    }
+</div>
+
+@code {
+    [Parameter, EditorRequired] public TelemetryApiClient ApiClient { get; set; } = null!;
+    [Parameter] public EventCallback OnClose { get; set; }
+    [Parameter] public EventCallback OnRegistered { get; set; }
+
+    private List<(string Id, string Path)> _subZones = [];
+    private string _selectedSubZoneId = "";
+    private string _macAddress = "";
+    private SensorCategory _category = SensorCategory.Environmental;
+    private string _locationDescription = "";
+    private bool _submitting;
+    private string? _message;
+    private bool _success;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var tree = await ApiClient.GetTreeAsync();
+        if (tree is not null)
+        {
+            var results = new List<(string, string)>();
+            CollectSubZones(tree, "", results);
+            _subZones = results;
+        }
+    }
+
+    private static void CollectSubZones(TreeNodeDto node, string pathSoFar, List<(string, string)> results)
+    {
+        var path = string.IsNullOrEmpty(pathSoFar) ? node.Name : $"{pathSoFar} / {node.Name}";
+        if (node.NodeType == "SubZone")
+        {
+            results.Add((node.Id, path));
+        }
+        foreach (var child in node.Children)
+        {
+            CollectSubZones(child, path, results);
+        }
+    }
+
+    private async Task Submit()
+    {
+        if (string.IsNullOrWhiteSpace(_selectedSubZoneId))
+        {
+            _message = "Select a sub-zone before registering.";
+            _success = false;
+            return;
+        }
+        if (string.IsNullOrWhiteSpace(_macAddress) || string.IsNullOrWhiteSpace(_locationDescription))
+        {
+            _message = "MAC address and deployment location are required.";
+            _success = false;
+            return;
+        }
+
+        _submitting = true;
+        _message = null;
+        StateHasChanged();
+
+        var result = await ApiClient.RegisterDeviceAsync(_selectedSubZoneId, _macAddress, _category, _locationDescription);
+
+        _submitting = false;
+
+        if (result is null)
+        {
+            _message = "Registration failed: no response from the API.";
+            _success = false;
+        }
+        else if (result.IsValid)
+        {
+            _success = true;
+            _message = "Device registered.";
+            _macAddress = "";
+            _locationDescription = "";
+            await OnRegistered.InvokeAsync();
+        }
+        else
+        {
+            _success = false;
+            _message = string.Join(" ", result.Errors);
+        }
+    }
+}
