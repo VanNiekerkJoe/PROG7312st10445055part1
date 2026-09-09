@@ -59,7 +59,8 @@ else
 
         @foreach (var (device, point) in Layout)
         {
-            <g class="node-group @(IsDimmed(device) ? "dimmed" : "")"
+            <g class="node-group @(IsDimmed(device) ? "dimmed" : "") @(_spawnIds.Contains(device.DeviceId) ? "spawn" : "")"
+               @key="device.DeviceId"
                @onclick="() => OnDeviceSelected.InvokeAsync(device)">
 
                 @if (device.Severity == AnomalySeverity.Anomalous)
@@ -70,8 +71,12 @@ else
                 {
                     <circle cx="@(F(point.X))" cy="@(F(point.Y))" r="@(point.Radius + 6)" class="lockon-ring" />
                 }
+                @if (_spawnIds.Contains(device.DeviceId))
+                {
+                    <circle cx="@(F(point.X))" cy="@(F(point.Y))" r="4" class="spawn-ring" />
+                }
 
-                <circle cx="@(F(point.X))" cy="@(F(point.Y))" r="@(point.Radius + 3)"
+                <circle cx="@(F(point.X))" cy="@(F(point.Y))" r="@(point.Radius + 4)"
                         class="detect-flash" style="animation-delay:@(F(point.PingDelaySeconds))s" />
 
                 <circle cx="@(F(point.X))" cy="@(F(point.Y))" r="@(point.Radius + 7)" class="node-hit" />
@@ -123,6 +128,16 @@ else
     private const double SweepDurationSeconds = 6.0;
     private readonly HashSet<AnomalySeverity> _hiddenSeverities = [];
 
+    private readonly HashSet<string> _knownDeviceIds = [];
+    private HashSet<string> _spawnIds = [];
+
+    protected override void OnParametersSet()
+    {
+        var currentIds = Devices.Select(d => d.DeviceId).ToHashSet();
+        _spawnIds = currentIds.Except(_knownDeviceIds).ToHashSet();
+        _knownDeviceIds.UnionWith(currentIds);
+    }
+
     private List<(DeviceStatus Device, NodePoint Point)> Layout =>
         Devices
             .OrderBy(d => d.DeviceId, StringComparer.Ordinal)
@@ -151,12 +166,23 @@ else
         _hiddenSeverities.Contains(device.Severity) ||
         (HighlightZone is not null && device.ZoneName != HighlightZone);
 
+    // Guarded: refuses to hide the last remaining visible severity, so the
+    // legend can never dim every node on the scope at once again.
     private void ToggleSeverity(AnomalySeverity severity)
     {
-        if (!_hiddenSeverities.Add(severity))
+        if (_hiddenSeverities.Contains(severity))
         {
             _hiddenSeverities.Remove(severity);
+            return;
         }
+
+        const int totalSeverities = 4;
+        if (_hiddenSeverities.Count >= totalSeverities - 1)
+        {
+            return; // would hide the last visible one — refuse the toggle
+        }
+
+        _hiddenSeverities.Add(severity);
     }
 
     private async Task ResetFilters()
