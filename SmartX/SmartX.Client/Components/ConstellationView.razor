@@ -151,13 +151,25 @@ else
         }
     }
 
-    // Public method to manually trigger spawn animations on all devices
+    // Public method to trigger spawn animations on all devices
     public void TriggerSpawnForAll()
     {
         _spawnIds = Devices.Select(d => d.DeviceId).ToHashSet();
         _knownDeviceIds.Clear();
         _knownDeviceIds.UnionWith(_spawnIds);
         StateHasChanged();
+    }
+
+    // Public method to trigger spawn animation on a specific device
+    public void TriggerSpawnForDevice(string deviceId)
+    {
+        if (Devices.Any(d => d.DeviceId == deviceId))
+        {
+            _spawnIds.Add(deviceId);
+            _knownDeviceIds.Remove(deviceId);
+            _knownDeviceIds.Add(deviceId);
+            StateHasChanged();
+        }
     }
 
     private List<(DeviceStatus Device, NodePoint Point)> Layout =>

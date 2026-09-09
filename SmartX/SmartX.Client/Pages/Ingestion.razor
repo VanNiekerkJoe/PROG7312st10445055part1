@@ -25,7 +25,9 @@
     </div>
     @if (_showRegistrationForm)
     {
-        <DeviceRegistrationForm ApiClient="Api" OnClose="() => _showRegistrationForm = false" OnRegistered="() => _showRegistrationForm = false" />
+        <DeviceRegistrationForm ApiClient="Api" 
+                                OnClose="() => _showRegistrationForm = false" 
+                                OnRegistered="OnDeviceRegistered" />
     }
     @if (_highlightZone is not null)
     {
@@ -38,9 +40,12 @@
         <ZoneList Zones="_zoneSummaries" OnZoneSelected="OnZoneClicked" ActiveZone="_highlightZone" />
         <div class="panel constellation-panel">
             <p class="panel-title">Anomaly constellation</p>
-            <ConstellationView Devices="_devices" OnDeviceSelected="OnDeviceSelected"
-                    SelectedDeviceId="_selected?.DeviceId" HighlightZone="_highlightZone"
-                    OnResetFilters="() => _highlightZone = null" />
+            <ConstellationView @ref="_constellationView" 
+                               Devices="_devices" 
+                               OnDeviceSelected="OnDeviceSelected"
+                               SelectedDeviceId="_selected?.DeviceId" 
+                               HighlightZone="_highlightZone"
+                               OnResetFilters="() => _highlightZone = null" />
         </div>
         <SensorDetailPanel Selected="_selected" ApiClient="Api" />
     </div>
@@ -59,6 +64,7 @@
     private int _anomalyCount;
     private int _disconnectedCount;
     private int _throughputPerMinute;
+    private ConstellationView? _constellationView;
 
     protected override async Task OnInitializedAsync()
     {
@@ -108,6 +114,27 @@
     private void OnDeviceSelected(DeviceStatus device) => _selected = device;
     private void OnZoneClicked(string zoneName) => _highlightZone = _highlightZone == zoneName ? null : zoneName;
 
+    // Handle device registration - adds the new device immediately
+    private async Task OnDeviceRegistered(DeviceStatus newDevice)
+    {
+        _showRegistrationForm = false; // Close the form
+        
+        // Add the new device to the dictionary
+        _statusByDevice[newDevice.DeviceId] = newDevice;
+        
+        // Refresh the display
+        Recompute();
+        StateHasChanged();
+        
+        // Trigger spawn animation on the new node
+        if (_constellationView is not null)
+        {
+            // Force the new device to spawn with animation
+            await Task.Delay(100); // Small delay to ensure DOM updates
+            _constellationView.TriggerSpawnForDevice(newDevice.DeviceId);
+        }
+    }
+
     // DEV-ONLY: populates the scope with a fixed, varied set of fake devices so you can see
     // every severity state, multiple zones, and the interactions (click, lock-on, filters,
     // zone highlight) without the API/SignalR seeder running. Safe to delete before submission.
@@ -132,11 +159,21 @@
             new DeviceStatus { DeviceId = "A3-CO2-02",  ZoneName = "Zone A", Category = SensorCategory.Environmental, Severity = AnomalySeverity.Elevated,     LastValue = 940,   ZScore = 2.3,  ThroughputLastMinute = 8,  LastSeen = now },
         };
 
+        // Clear existing devices
+        _statusByDevice.Clear();
+        
         foreach (var device in testDevices)
         {
             _statusByDevice[device.DeviceId] = device;
         }
+        
         Recompute();
+        
+        // Trigger spawn animation on all nodes
+        if (_constellationView is not null)
+        {
+            _constellationView.TriggerSpawnForAll();
+        }
     }
 
     public async ValueTask DisposeAsync()
