@@ -15,9 +15,21 @@ SmartX.sln
 
 ## Prerequisites
 
-- .NET 10 SDK (check with `dotnet --version`. If your installed SDK reports a different
-  minor version than `10.0.0`), open `SmartX.Client/SmartX.Client.csproj` and bump the three
-  `PackageReference` versions to match; the client won't restore otherwise.
+- **.NET 10 SDK** (check with `dotnet --version`; should report `10.0.1xx`). If your installed
+  SDK reports a different minor version, open `SmartX.Client/SmartX.Client.csproj` and bump the
+  three `PackageReference` versions to match, or the client won't restore.
+- **The `wasm-tools` workload**, required to build/run the Blazor WebAssembly client. Install it
+  once per machine, from an **elevated/administrator** terminal:
+  ```
+  dotnet workload install wasm-tools
+  ```
+  Building or running `SmartX.Client` without this fails with `NETSDK1112: The runtime pack for
+  Microsoft.NETCore.App.Runtime.Mono.browser-wasm was not downloaded`. See **Troubleshooting**
+  below if the install itself fails.
+- If you're using Visual Studio rather than the `dotnet` CLI: **Visual Studio 2026 (18.0+)**.
+  Visual Studio 2022 (any 17.x) cannot open or build a `net10.0` project at all — this is a hard
+  Microsoft-imposed limit, not a bug here. The `dotnet` CLI works regardless of which Visual
+  Studio (if any) is installed.
 - A modern browser (Blazor WebAssembly).
 
 ## Restoring and building
@@ -63,6 +75,49 @@ click **Sensor Data Ingestion & Telemetry** to open the dashboard.
 - The **Anomaly Constellation**: a live radial view of every sensor, updating in real time as the
   seeder pushes readings. Click any node to open its detail panel and attach a file.
 - Alert timeline strip along the bottom, populated as non-healthy statuses occur.
+
+## API endpoints (SmartX.Api)
+
+| Method | Route                          | Purpose                                                                 |
+|--------|--------------------------------|--------------------------------------------------------------------------|
+| GET    | `/api/sensors`                 | Latest `DeviceStatus` snapshot for every known device.                  |
+| GET    | `/api/sensors/tree`            | Full Facility → Zone → Sub-Zone → Device deployment tree.               |
+| GET    | `/api/sensors/validate`        | Re-runs the recursive tree validator, returns `{ isValid, errors }`.    |
+| POST   | `/api/sensors/register`        | Registers a new device under a sub-zone; returns the server-assigned `DeviceStatus` (real device ID, not the MAC). |
+| DELETE | `/api/sensors/{deviceId}`      | Removes a single device from the tree and every server-side index.      |
+| POST   | `/api/sensors/clear`           | Clears **every** device from the tree/registry, keeping the Facility/Zone/Sub-Zone skeleton. |
+| POST   | `/api/sensors/{deviceId}/attachments` | Multipart upload of a config file / photo / log for a device.    |
+| GET/POST | `/api/sensors/seeder/status`, `/start`, `/stop` | Dev controls for the background telemetry generator.   |
+
+`register`, `DELETE /{deviceId}` and `POST /clear` all broadcast over the `TelemetryHub` SignalR
+hub (`DeviceStatusUpdated`, `DeviceRemoved`, `AllDevicesCleared`) so every connected dashboard —
+not just the one that made the call — stays in sync.
+
+### Fixed: "clear all" not actually clearing simulated nodes
+
+Earlier drafts of the dashboard only cleared the *client's* local dictionary when you clicked
+"clear all" / "stop seeder & clear all". The `SensorRegistry` on the server never forgot
+anything, so:
+
+- a page reload (or the "Reload from API" button) pulled the same devices straight back from
+  `GET /api/sensors`, and
+- the seeder held a **one-time snapshot** of the device list taken at startup, so it kept
+  broadcasting `DeviceStatusUpdated` for devices you'd just "cleared" the moment it ticked again.
+
+Fixed by making the clear operation authoritative on the server:
+
+- `SensorRegistry.ClearAllDevices()` / `RemoveDevice(id)` actually remove the device node(s) from
+  the tree and purge every dictionary keyed on that device ID (index, baseline, latest status,
+  batcher, throughput counter).
+- `TelemetrySeeder` re-reads `registry.DeviceNodes` **every tick** instead of once at startup, so
+  it immediately stops feeding a removed/cleared device (and immediately starts feeding a newly
+  registered one, which was a second, related bug).
+- The new `POST /api/sensors/clear` and `DELETE /api/sensors/{deviceId}` endpoints broadcast
+  `AllDevicesCleared` / `DeviceRemoved` over SignalR, and the client re-syncs from the API on
+  SignalR reconnect, so multiple open dashboards and reconnects can't drift out of sync.
+- Registering a device now also returns the server-assigned device ID/zone (instead of the client
+  guessing and keying its local state on the MAC address), which was the root cause of newly
+  registered devices showing up as duplicate/orphaned nodes.
 
 ## Running the tests
 
