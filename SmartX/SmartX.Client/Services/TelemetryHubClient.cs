@@ -13,7 +13,10 @@ public sealed class TelemetryHubClient : IAsyncDisposable
     private bool _started;
 
     public event Action<DeviceStatus>? StatusUpdated;
+    public event Action<string>? DeviceRemoved;
+    public event Action? AllDevicesCleared;
     public event Action? ConnectionStateChanged;
+    public event Action? Reconnected;
 
     public TelemetryHubClient(string hubUrl)
     {
@@ -23,9 +26,21 @@ public sealed class TelemetryHubClient : IAsyncDisposable
             .Build();
 
         _connection.On<DeviceStatus>("DeviceStatusUpdated", status => StatusUpdated?.Invoke(status));
+        _connection.On<string>("DeviceRemoved", deviceId => DeviceRemoved?.Invoke(deviceId));
+        _connection.On("AllDevicesCleared", () => AllDevicesCleared?.Invoke());
 
+        // Reconnects (e.g. after the dev server restarts, or a brief network
+        // blip) can miss events that fired while disconnected. Re-syncing the
+        // full device list on reconnect is what stops a client that missed a
+        // "clear" or "remove" broadcast from being stuck showing ghost nodes
+        // forever.
         _connection.Reconnecting += _ => { ConnectionStateChanged?.Invoke(); return Task.CompletedTask; };
-        _connection.Reconnected += _ => { ConnectionStateChanged?.Invoke(); return Task.CompletedTask; };
+        _connection.Reconnected += _ =>
+        {
+            ConnectionStateChanged?.Invoke();
+            Reconnected?.Invoke();
+            return Task.CompletedTask;
+        };
         _connection.Closed += _ => { ConnectionStateChanged?.Invoke(); return Task.CompletedTask; };
     }
 

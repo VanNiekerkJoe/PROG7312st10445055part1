@@ -1,7 +1,9 @@
 using SmartX.Api.Services;
+using SmartX.Api.Hubs;
 using SmartX.Core.Devices;
 using SmartX.Core.Telemetry;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.SignalR;
 
 namespace SmartX.Api.Endpoints;
 
@@ -37,10 +39,52 @@ public static class SensorEndpoints
             return Results.Ok(result);
         });
 
-        group.MapPost("/register", (RegisterDeviceRequest request, SensorRegistry registry) =>
+        group.MapPost("/register", async (RegisterDeviceRequest request, SensorRegistry registry, IHubContext<TelemetryHub> hub) =>
         {
-            var result = registry.RegisterDevice(request.ParentSubZoneId, request.MacAddress, request.Category, request.LocationDescription);
-            return result.IsValid ? Results.Ok(result) : Results.BadRequest(result);
+            var outcome = registry.RegisterDevice(request.ParentSubZoneId, request.MacAddress, request.Category, request.LocationDescription);
+
+            if (!outcome.IsValid)
+            {
+                return Results.BadRequest(outcome);
+            }
+
+            // Broadcast immediately so every other connected dashboard picks
+            // up the new node too, not just the one that registered it.
+            if (outcome.Device is not null)
+            {
+                await hub.Clients.All.SendAsync("DeviceStatusUpdated", outcome.Device);
+            }
+
+            return Results.Ok(outcome);
+        });
+
+        // Removes a single simulated/registered device from the tree and
+        // notifies every connected dashboard so it disappears everywhere,
+        // not just for the caller.
+        group.MapDelete("/{deviceId}", async (string deviceId, SensorRegistry registry, IHubContext<TelemetryHub> hub) =>
+        {
+            var removed = registry.RemoveDevice(deviceId);
+            if (!removed)
+            {
+                return Results.NotFound($"Device '{deviceId}' was not found.");
+            }
+
+            await hub.Clients.All.SendAsync("DeviceRemoved", deviceId);
+            return Results.Ok(new { deviceId, removed = true });
+        });
+
+        // Clears every simulated/registered device from the registry (tree,
+        // baselines, latest status, batchers, throughput counters) and
+        // notifies every connected dashboard to drop its local state too.
+        // This is the fix for "clear all" only ever working client-side:
+        // previously nothing on the server ever forgot a device, so a page
+        // reload or the next seeder tick would bring every "cleared" node
+        // straight back.
+        group.MapPost("/clear", async (SensorRegistry registry, IHubContext<TelemetryHub> hub) =>
+        {
+            registry.ClearAllDevices();
+            await hub.Clients.All.SendAsync("AllDevicesCleared");
+            return Results.Ok(new { cleared = true });
         });
 
         group.MapPost("/{deviceId}/attachments", async (string deviceId, HttpRequest request, SensorRegistry registry) =>

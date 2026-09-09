@@ -75,10 +75,15 @@ public sealed class TelemetrySeeder(SensorRegistry registry, IHubContext<Telemet
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        var devices = registry.DeviceNodes.ToList();
-        var currentValue = devices.ToDictionary(d => d.Id, d => InitialValueFor(d.Sensor!.Category));
+        // Deliberately NOT snapshotted once here. The device roster is
+        // re-read from the registry every tick (see below) so that devices
+        // registered after startup start reporting immediately, and devices
+        // removed or cleared (via /api/sensors/clear or DELETE /{deviceId})
+        // stop being fed telemetry on the very next tick instead of a stale
+        // in-memory list keeping "deleted" devices alive forever.
+        var currentValue = new Dictionary<string, float>();
 
-        logger.LogInformation("Telemetry seeder starting for {Count} devices.", devices.Count);
+        logger.LogInformation("Telemetry seeder starting.");
 
         var tick = 0;
         while (!stoppingToken.IsCancellationRequested)
@@ -101,8 +106,20 @@ public sealed class TelemetrySeeder(SensorRegistry registry, IHubContext<Telemet
                 continue;
             }
 
+            var devices = registry.DeviceNodes.ToList();
+            var liveDeviceIds = devices.Select(d => d.Id).ToHashSet();
+            foreach (var staleId in currentValue.Keys.Where(id => !liveDeviceIds.Contains(id)).ToList())
+            {
+                currentValue.Remove(staleId);
+            }
+
             foreach (var device in devices)
             {
+                if (!currentValue.ContainsKey(device.Id))
+                {
+                    currentValue[device.Id] = InitialValueFor(device.Sensor!.Category);
+                }
+
                 if (_random.NextDouble() < 0.05) continue; // simulate a device that didn't report this tick
 
                 var category = device.Sensor!.Category;

@@ -14,24 +14,22 @@
         <button class="registration-toggle-btn" @onclick="() => _showRegistrationForm = !_showRegistrationForm">
             + Register sensor
         </button>
-        @* DEV-ONLY: Stop seeder and clear all *@
-        <button class="test-data-btn" @onclick="StopSeederAndClearAll" style="color: var(--red); border-color: var(--red);">
-            ⏹ Stop seeder & clear all
+        @if (_seederRunning)
+        {
+            <button class="test-data-btn" @onclick="StopSeeder" style="color: var(--red); border-color: var(--red);" disabled="@_busy">
+                ⏹ Stop seeder
+            </button>
+        }
+        else
+        {
+            <button class="test-data-btn" @onclick="StartSeeder" style="color: var(--green); border-color: var(--green);" disabled="@_busy">
+                ▶ Start seeder
+            </button>
+        }
+        <button class="test-data-btn" @onclick="ClearAllDevices" style="color: var(--orange); border-color: var(--orange);" disabled="@_busy">
+            🗑 Clear all devices
         </button>
-        @* DEV-ONLY: Start seeder *@
-        <button class="test-data-btn" @onclick="StartSeeder" style="color: var(--green); border-color: var(--green);">
-            ▶ Start seeder
-        </button>
-        @* DEV-ONLY: Clear test data *@
-        <button class="test-data-btn" @onclick="ClearTestDevices" style="color: var(--orange); border-color: var(--orange);">
-            ✕ Clear test data
-        </button>
-        @* DEV-ONLY: Load test data *@
-        <button class="test-data-btn" @onclick="LoadTestNodes">
-            + Load test data
-        </button>
-        @* DEV-ONLY: Reload from API *@
-        <button class="test-data-btn" @onclick="ReloadFromApi" style="color: var(--accent); border-color: var(--accent-dim);">
+        <button class="test-data-btn" @onclick="ReloadFromApi" style="color: var(--accent); border-color: var(--accent-dim);" disabled="@_busy">
             🔄 Reload from API
         </button>
     </header>
@@ -65,16 +63,19 @@
                                HighlightZone="_highlightZone"
                                OnResetFilters="() => _highlightZone = null" />
         </div>
-        <SensorDetailPanel Selected="_selected" ApiClient="Api" />
+        <SensorDetailPanel Selected="_selected" ApiClient="Api" OnRemoveDevice="RemoveDevice" />
     </div>
     <AlertTimeline Events="_alertEvents" />
 </div>
 
 @code {
+    // _statusByDevice is a client-side cache only. The registry it mirrors
+    // lives on the server (SensorRegistry); every mutation below (register,
+    // remove, clear) goes through the API first and only updates this cache
+    // once the server has confirmed it, so a reload or SignalR reconnect can
+    // never resurrect something the server has already forgotten.
     private readonly Dictionary<string, DeviceStatus> _statusByDevice = new();
     private readonly List<AlertTimeline.AlertEvent> _alertEvents = [];
-    private readonly HashSet<string> _testDeviceIds = new();
-    private readonly HashSet<string> _knownTestDeviceIds = new();
     private const int MaxAlertEvents = 40;
     private List<DeviceStatus> _devices = [];
     private List<ZoneList.ZoneSummary> _zoneSummaries = [];
@@ -86,34 +87,23 @@
     private int _disconnectedCount;
     private int _throughputPerMinute;
     private ConstellationView? _constellationView;
-    private bool _ignoreSignalRUpdates = false;
-    private bool _hasTestData = false;
     private bool _seederRunning = true;
-    private bool _isInitialized = false;
-    private bool _loadFromApiOnInit = true; // Set to false to prevent auto-loading
+    private bool _busy;
 
     protected override async Task OnInitializedAsync()
     {
         try
         {
-            // Get seeder status
             var status = await Api.GetSeederStatusAsync();
             _seederRunning = status?.IsRunning ?? true;
-            
-            // Only load from API if enabled
-            if (_loadFromApiOnInit)
-            {
-                var initial = await Api.GetAllStatusesAsync();
-                foreach (var device in initial)
-                {
-                    _statusByDevice[device.DeviceId] = device;
-                }
-            }
-            
-            Recompute();
+
+            await ReloadFromApi();
+
             Hub.StatusUpdated += OnStatusUpdated;
+            Hub.DeviceRemoved += OnDeviceRemoved;
+            Hub.AllDevicesCleared += OnAllDevicesCleared;
+            Hub.Reconnected += OnReconnected;
             await Hub.EnsureStartedAsync();
-            _isInitialized = true;
         }
         catch (Exception ex)
         {
@@ -123,17 +113,8 @@
 
     private void OnStatusUpdated(DeviceStatus status)
     {
-        if (_ignoreSignalRUpdates) return;
-        
         try
         {
-            // Don't override test data with API updates if we have test data loaded
-            if (_hasTestData && _testDeviceIds.Contains(status.DeviceId))
-            {
-                // Keep our test data, don't override with API data
-                return;
-            }
-            
             _statusByDevice[status.DeviceId] = status;
             if (status.Severity is AnomalySeverity.Anomalous or AnomalySeverity.Elevated or AnomalySeverity.Disconnected)
             {
@@ -150,6 +131,43 @@
         {
             Console.WriteLine($"Error in OnStatusUpdated: {ex.Message}");
         }
+    }
+
+    // Fired when any client (including this one) removes a single device via
+    // the API. Every connected dashboard applies it, so a device removed on
+    // one screen actually disappears everywhere.
+    private void OnDeviceRemoved(string deviceId)
+    {
+        _statusByDevice.Remove(deviceId);
+        _alertEvents.RemoveAll(e => e.DeviceId == deviceId);
+        if (_selected?.DeviceId == deviceId)
+        {
+            _selected = null;
+        }
+        Recompute();
+        InvokeAsync(StateHasChanged);
+    }
+
+    // Fired when any client clears the whole registry. This is the broadcast
+    // that makes "clear all" actually stick everywhere instead of just on
+    // the screen that clicked the button.
+    private void OnAllDevicesCleared()
+    {
+        _statusByDevice.Clear();
+        _alertEvents.Clear();
+        _selected = null;
+        Recompute();
+        InvokeAsync(StateHasChanged);
+    }
+
+    // If the SignalR connection drops and reconnects, we may have missed a
+    // remove/clear/update broadcast while offline. Re-pulling the full list
+    // from the API is the safe way to guarantee we end up in sync with the
+    // server rather than possibly stuck showing stale nodes.
+    private async void OnReconnected()
+    {
+        await ReloadFromApi();
+        await InvokeAsync(StateHasChanged);
     }
 
     private void Recompute()
@@ -202,7 +220,8 @@
         }
     }
 
-    // Reload from API manually
+    // Reload from API manually - and also used internally to (re)sync state,
+    // since it's the single source of truth for "what devices exist".
     private async Task ReloadFromApi()
     {
         try
@@ -213,9 +232,6 @@
             {
                 _statusByDevice[device.DeviceId] = device;
             }
-            _hasTestData = false;
-            _testDeviceIds.Clear();
-            _knownTestDeviceIds.Clear();
             Recompute();
             StateHasChanged();
             Console.WriteLine($"Loaded {devices.Count} devices from API");
@@ -229,13 +245,13 @@
     // Start the seeder
     private async Task StartSeeder()
     {
+        _busy = true;
         try
         {
             var started = await Api.StartSeederAsync();
             if (started)
             {
                 _seederRunning = true;
-                Console.WriteLine("Seeder started successfully");
             }
             else
             {
@@ -246,164 +262,97 @@
         {
             Console.WriteLine($"Error starting seeder: {ex.Message}");
         }
+        finally
+        {
+            _busy = false;
+        }
     }
 
-    // Stop seeder AND clear all devices
-    private async Task StopSeederAndClearAll()
+    // Stop the seeder (devices already registered keep their last-known
+    // status; no telemetry updates arrive until it's started again).
+    private async Task StopSeeder()
     {
+        _busy = true;
         try
         {
-            _ignoreSignalRUpdates = true;
-            
-            // Stop the seeder
             var stopped = await Api.StopSeederAsync();
             if (stopped)
             {
                 _seederRunning = false;
-                Console.WriteLine("Seeder stopped successfully");
             }
             else
             {
-                Console.WriteLine("Failed to stop seeder, continuing with clear");
+                Console.WriteLine("Failed to stop seeder");
             }
-            
-            // Wait a moment for any pending messages
-            await Task.Delay(500);
-            
-            // Clear ALL devices
-            _statusByDevice.Clear();
-            _testDeviceIds.Clear();
-            _knownTestDeviceIds.Clear();
-            _alertEvents.Clear();
-            _selected = null;
-            _hasTestData = false;
-            
-            Recompute();
-            StateHasChanged();
-            
-            Console.WriteLine("All devices cleared");
-            
-            // Re-enable updates
-            await Task.Delay(500);
-            _ignoreSignalRUpdates = false;
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"Error in StopSeederAndClearAll: {ex.Message}");
-            _ignoreSignalRUpdates = false;
+            Console.WriteLine($"Error stopping seeder: {ex.Message}");
+        }
+        finally
+        {
+            _busy = false;
         }
     }
 
-    // Clear ONLY test devices
-    private async Task ClearTestDevices()
+    // Clears every device from the *server-side* registry (tree, baselines,
+    // latest status, batchers, throughput counters) and only then clears the
+    // local cache. Doing it in this order - server first - is what actually
+    // fixes "clearing all simulated nodes": previously this button only ever
+    // touched the client's local dictionary, so the API kept reporting every
+    // "cleared" device and they came straight back on the next reload or
+    // telemetry tick.
+    private async Task ClearAllDevices()
     {
+        _busy = true;
         try
         {
-            _ignoreSignalRUpdates = true;
-            
-            // Stop the seeder temporarily
-            await Api.StopSeederAsync();
-            _seederRunning = false;
-            
-            // Wait for pending messages
-            await Task.Delay(500);
-            
-            foreach (var deviceId in _knownTestDeviceIds.ToList())
+            var cleared = await Api.ClearAllDevicesAsync();
+            if (!cleared)
             {
-                if (_statusByDevice.ContainsKey(deviceId))
-                {
-                    _statusByDevice.Remove(deviceId);
-                    Console.WriteLine($"Removed test device: {deviceId}");
-                }
+                Console.WriteLine("Failed to clear devices on the server; local state left untouched.");
+                return;
             }
-            
-            _testDeviceIds.Clear();
-            _hasTestData = false;
-            
-            if (_selected is not null && _knownTestDeviceIds.Contains(_selected.DeviceId))
-            {
-                _selected = null;
-            }
-            
-            _alertEvents.RemoveAll(e => _knownTestDeviceIds.Contains(e.DeviceId));
-            
-            Recompute();
-            StateHasChanged();
-            
-            Console.WriteLine($"Cleared all test devices");
-            
-            await Task.Delay(500);
-            _ignoreSignalRUpdates = false;
+
+            // The server also broadcasts "AllDevicesCleared" to every
+            // connected dashboard (including this one) over SignalR, but we
+            // apply it immediately here too so the UI doesn't wait a round
+            // trip before it looks cleared.
+            OnAllDevicesCleared();
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"Error in ClearTestDevices: {ex.Message}");
-            _ignoreSignalRUpdates = false;
+            Console.WriteLine($"Error clearing devices: {ex.Message}");
+        }
+        finally
+        {
+            _busy = false;
         }
     }
 
-    // DEV-ONLY: Load test data matching the API's seed data
-    private void LoadTestNodes()
+    // Removes a single device from the server-side registry, used from the
+    // detail panel's "Remove device" action.
+    private async Task RemoveDevice(string deviceId)
     {
+        _busy = true;
         try
         {
-            var now = DateTimeOffset.UtcNow;
-            
-            var testDevices = new[]
+            var removed = await Api.RemoveDeviceAsync(deviceId);
+            if (!removed)
             {
-                // Zone A - Sub-Zone A1 (Hydroponic Bay)
-                new DeviceStatus { DeviceId = "ZA-SUB1-DEV1", ZoneName = "Zone A", Category = SensorCategory.Environmental, Severity = AnomalySeverity.Healthy, LastValue = 22.4, ZScore = 0.3, ThroughputLastMinute = 12, LastSeen = now },
-                new DeviceStatus { DeviceId = "ZA-SUB1-DEV2", ZoneName = "Zone A", Category = SensorCategory.Environmental, Severity = AnomalySeverity.Healthy, LastValue = 21.9, ZScore = 0.1, ThroughputLastMinute = 11, LastSeen = now },
-                new DeviceStatus { DeviceId = "ZA-SUB1-DEV3", ZoneName = "Zone A", Category = SensorCategory.Environmental, Severity = AnomalySeverity.Elevated, LastValue = 68.2, ZScore = 1.9, ThroughputLastMinute = 9, LastSeen = now },
-                new DeviceStatus { DeviceId = "ZA-SUB1-DEV4", ZoneName = "Zone A", Category = SensorCategory.Environmental, Severity = AnomalySeverity.Healthy, LastValue = 23.1, ZScore = 0.2, ThroughputLastMinute = 11, LastSeen = now },
-                
-                // Zone B - Sub-Zone B1 (Utility Room)
-                new DeviceStatus { DeviceId = "ZB-SUB1-DEV1", ZoneName = "Zone B", Category = SensorCategory.Power, Severity = AnomalySeverity.Healthy, LastValue = 220.5, ZScore = 0.2, ThroughputLastMinute = 14, LastSeen = now },
-                new DeviceStatus { DeviceId = "ZB-SUB1-DEV2", ZoneName = "Zone B", Category = SensorCategory.Power, Severity = AnomalySeverity.Elevated, LastValue = 235.1, ZScore = 2.1, ThroughputLastMinute = 10, LastSeen = now },
-                new DeviceStatus { DeviceId = "ZB-SUB1-DEV3", ZoneName = "Zone B", Category = SensorCategory.Power, Severity = AnomalySeverity.Anomalous, LastValue = 280.7, ZScore = 4.6, ThroughputLastMinute = 3, LastSeen = now },
-                
-                // Zone B - Sub-Zone B2 (Valve Bank)
-                new DeviceStatus { DeviceId = "ZB-SUB2-DEV1", ZoneName = "Zone B", Category = SensorCategory.Actuator, Severity = AnomalySeverity.Healthy, LastValue = 1.2, ZScore = 0.4, ThroughputLastMinute = 13, LastSeen = now },
-                new DeviceStatus { DeviceId = "ZB-SUB2-DEV2", ZoneName = "Zone B", Category = SensorCategory.Actuator, Severity = AnomalySeverity.Healthy, LastValue = 0.9, ZScore = 0.3, ThroughputLastMinute = 12, LastSeen = now },
-                new DeviceStatus { DeviceId = "ZB-SUB2-DEV3", ZoneName = "Zone B", Category = SensorCategory.Actuator, Severity = AnomalySeverity.Disconnected, LastValue = 0.0, ZScore = 0.0, ThroughputLastMinute = 0, LastSeen = now.AddMinutes(-14) },
-                
-                // Zone C - Sub-Zone C1 (Grid Substation)
-                new DeviceStatus { DeviceId = "ZC-SUB1-DEV1", ZoneName = "Zone C", Category = SensorCategory.Power, Severity = AnomalySeverity.Healthy, LastValue = 218.3, ZScore = 0.5, ThroughputLastMinute = 10, LastSeen = now },
-                new DeviceStatus { DeviceId = "ZC-SUB1-DEV2", ZoneName = "Zone C", Category = SensorCategory.Power, Severity = AnomalySeverity.Elevated, LastValue = 245.6, ZScore = 2.3, ThroughputLastMinute = 8, LastSeen = now },
-                new DeviceStatus { DeviceId = "ZC-SUB1-DEV3", ZoneName = "Zone C", Category = SensorCategory.Power, Severity = AnomalySeverity.Anomalous, LastValue = 310.2, ZScore = 5.2, ThroughputLastMinute = 2, LastSeen = now },
-                new DeviceStatus { DeviceId = "ZC-SUB1-DEV4", ZoneName = "Zone C", Category = SensorCategory.Power, Severity = AnomalySeverity.Disconnected, LastValue = 0.0, ZScore = 0.0, ThroughputLastMinute = 0, LastSeen = now.AddMinutes(-31) },
-            };
+                Console.WriteLine($"Failed to remove device '{deviceId}' on the server.");
+                return;
+            }
 
-            // Clear existing test devices first
-            foreach (var deviceId in _knownTestDeviceIds.ToList())
-            {
-                _statusByDevice.Remove(deviceId);
-            }
-            _testDeviceIds.Clear();
-            _knownTestDeviceIds.Clear();
-
-            foreach (var device in testDevices)
-            {
-                _testDeviceIds.Add(device.DeviceId);
-                _knownTestDeviceIds.Add(device.DeviceId);
-                _statusByDevice[device.DeviceId] = device;
-            }
-            
-            _hasTestData = true;
-            
-            Recompute();
-            
-            if (_constellationView is not null)
-            {
-                _constellationView.TriggerSpawnForAll();
-            }
-            
-            StateHasChanged();
-            Console.WriteLine($"Loaded {testDevices.Length} test devices");
+            OnDeviceRemoved(deviceId);
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"Error in LoadTestNodes: {ex.Message}");
+            Console.WriteLine($"Error removing device: {ex.Message}");
+        }
+        finally
+        {
+            _busy = false;
         }
     }
 
@@ -412,6 +361,9 @@
         try
         {
             Hub.StatusUpdated -= OnStatusUpdated;
+            Hub.DeviceRemoved -= OnDeviceRemoved;
+            Hub.AllDevicesCleared -= OnAllDevicesCleared;
+            Hub.Reconnected -= OnReconnected;
         }
         catch (Exception ex)
         {

@@ -140,31 +140,21 @@
             _message = "Registration failed: no response from the API.";
             _success = false;
         }
-        else if (result.IsValid)
+        else if (result.IsValid && result.Device is not null)
         {
             _success = true;
             _message = "✅ Device registered successfully!";
-            
-            // Create a basic device status from the registration data
-            var newDevice = new DeviceStatus
-            {
-                DeviceId = _macAddress,
-                ZoneName = _selectedSubZoneId, // Will be resolved by the parent
-                Category = _category,
-                Severity = AnomalySeverity.Healthy,
-                LastValue = 0,
-                ZScore = 0,
-                ThroughputLastMinute = 0,
-                LastSeen = DateTimeOffset.UtcNow
-            };
-            
-            // Pass the new device back to parent so it can add it immediately
-            await OnRegistered.InvokeAsync(newDevice);
-            
+
+            // Use the server-assigned device (real ID, real zone name) rather
+            // than fabricating one locally - a locally-guessed ID (e.g. the
+            // MAC address) never lines up with the IDs the seeder/hub use for
+            // this device, which is how duplicate/orphaned nodes crept in.
+            await OnRegistered.InvokeAsync(result.Device);
+
             // Clear form for next registration
             _macAddress = "";
             _locationDescription = "";
-            
+
             // Don't close - let user register another
             StateHasChanged();
         }

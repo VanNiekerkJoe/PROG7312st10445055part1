@@ -260,6 +260,11 @@ body {
         border-color: var(--accent-dim);
     }
 
+    .test-data-btn:disabled {
+        opacity: 0.45;
+        cursor: not-allowed;
+    }
+
 .registration-toggle-btn {
     font-family: var(--font-mono);
     font-size: 0.7rem;
@@ -876,6 +881,29 @@ body {
     font-size: 0.95rem;
     letter-spacing: 0.03em;
 }
+
+.detail-header-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+}
+
+.detail-remove-btn {
+    background: transparent;
+    border: 1px solid var(--red);
+    color: var(--red);
+    border-radius: 6px;
+    padding: 0.2rem 0.55rem;
+    font-size: 0.68rem;
+    letter-spacing: 0.03em;
+    cursor: pointer;
+    white-space: nowrap;
+}
+
+    .detail-remove-btn:hover {
+        background: var(--red-soft);
+    }
 
 .detail-empty {
     color: var(--muted);

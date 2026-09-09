@@ -15,6 +15,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\SmartX.Core\SmartX.Core.csproj" />
+    <ProjectReference Include="..\SmartX.Api\SmartX.Api.csproj" />
   </ItemGroup>
 
 </Project>
