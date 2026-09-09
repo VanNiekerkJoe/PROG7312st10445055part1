@@ -39,7 +39,8 @@
         <div class="panel constellation-panel">
             <p class="panel-title">Anomaly constellation</p>
             <ConstellationView Devices="_devices" OnDeviceSelected="OnDeviceSelected"
-                                SelectedDeviceId="_selected?.DeviceId" HighlightZone="_highlightZone" />
+                    SelectedDeviceId="_selected?.DeviceId" HighlightZone="_highlightZone"
+                    OnResetFilters="() => _highlightZone = null" />
         </div>
         <SensorDetailPanel Selected="_selected" ApiClient="Api" />
     </div>

@@ -15,7 +15,7 @@ public sealed class TelemetryApiClient(string baseAddress)
 
     public async Task<TreeNodeDto?> GetTreeAsync(CancellationToken ct = default) =>
         await _http.GetFromJsonAsync<TreeNodeDto>("/api/sensors/tree", ct);
-
+                        
     public async Task<ValidationResultDto?> ValidateTreeAsync(CancellationToken ct = default) =>
         await _http.GetFromJsonAsync<ValidationResultDto>("/api/sensors/validate", ct);
 

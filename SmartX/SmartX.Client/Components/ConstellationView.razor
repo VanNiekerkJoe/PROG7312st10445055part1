@@ -110,6 +110,7 @@ else
           @onclick="() => ToggleSeverity(AnomalySeverity.Disconnected)">
         <i class="dot sev-disconnected"></i> Disconnected
     </span>
+    <span class="legend-reset" @onclick="ResetFilters">Reset filters</span>
 </div>
 
 @code {
@@ -117,6 +118,7 @@ else
     [Parameter] public EventCallback<DeviceStatus> OnDeviceSelected { get; set; }
     [Parameter] public string? SelectedDeviceId { get; set; }
     [Parameter] public string? HighlightZone { get; set; }
+    [Parameter] public EventCallback OnResetFilters { get; set; }
 
     private const double SweepDurationSeconds = 6.0;
     private readonly HashSet<AnomalySeverity> _hiddenSeverities = [];
@@ -155,6 +157,12 @@ else
         {
             _hiddenSeverities.Remove(severity);
         }
+    }
+
+    private async Task ResetFilters()
+    {
+        _hiddenSeverities.Clear();
+        await OnResetFilters.InvokeAsync();
     }
 
     private static string F(double v) => v.ToString("0.##", CultureInfo.InvariantCulture);

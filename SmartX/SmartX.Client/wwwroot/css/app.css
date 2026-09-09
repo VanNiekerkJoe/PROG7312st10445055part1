@@ -14,6 +14,7 @@
     --green: #34d399;
     --amber: #d8a832;
     --red: #f0555a;
+    --red-soft: rgba(240, 85, 90, 0.18);
     --grey: #5b6b78;
     --font-mono: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
@@ -240,7 +241,6 @@ body {
     color: var(--border-bright);
 }
 
-/* Dev-only test-data trigger — delete this rule along with the button before submission */
 .test-data-btn {
     font-family: var(--font-mono);
     font-size: 0.7rem;
@@ -259,6 +259,118 @@ body {
         color: var(--accent);
         border-color: var(--accent-dim);
     }
+
+.registration-toggle-btn {
+    font-family: var(--font-mono);
+    font-size: 0.7rem;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--accent);
+    background: var(--accent-soft);
+    border: 1px solid var(--accent-dim);
+    border-radius: 2px;
+    padding: 0.4rem 0.7rem;
+    cursor: pointer;
+}
+
+    .registration-toggle-btn:hover {
+        border-color: var(--accent);
+    }
+
+.registration-panel {
+    margin-bottom: 0.7rem;
+}
+
+.registration-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 0.6rem;
+}
+
+.form-close {
+    cursor: pointer;
+    color: var(--muted);
+    font-size: 0.8rem;
+}
+
+    .form-close:hover {
+        color: var(--text);
+    }
+
+.form-field {
+    margin-bottom: 0.6rem;
+}
+
+.form-label {
+    display: block;
+    font-size: 0.68rem;
+    color: var(--muted);
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    margin-bottom: 0.25rem;
+}
+
+.form-input, .form-select {
+    width: 100%;
+    font-family: var(--font-mono);
+    font-size: 0.82rem;
+    background: var(--panel-raised);
+    color: var(--text);
+    border: 1px solid var(--border-bright);
+    border-radius: 2px;
+    padding: 0.4rem 0.5rem;
+}
+
+    .form-input:focus, .form-select:focus {
+        outline: none;
+        border-color: var(--accent);
+    }
+
+.form-actions {
+    margin-top: 0.7rem;
+}
+
+.form-submit {
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: var(--bg);
+    background: var(--accent);
+    border: none;
+    border-radius: 2px;
+    padding: 0.5rem 1rem;
+    cursor: pointer;
+}
+
+    .form-submit:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+    }
+
+    .form-submit:not(:disabled):hover {
+        background: #e6b940;
+    }
+
+.form-message {
+    margin-top: 0.6rem;
+    font-size: 0.78rem;
+    padding: 0.4rem 0.6rem;
+    border-radius: 2px;
+}
+
+.form-message-success {
+    color: var(--green);
+    background: rgba(52, 211, 153, 0.1);
+    border: 1px solid rgba(52, 211, 153, 0.3);
+}
+
+.form-message-error {
+    color: var(--red);
+    background: var(--red-soft);
+    border: 1px solid var(--red);
+}
 
 /* Filter chip */
 .filter-chip {
@@ -517,30 +629,38 @@ body {
 
 .node {
     stroke: none;
-    transition: opacity 0.15s ease;
+    transition: opacity 0.15s ease, filter 0.15s ease;
 }
 
 .sev-healthy {
-    fill: var(--green);
+    fill: #4eeba0;
 }
 
 .sev-elevated {
-    fill: var(--amber);
+    fill: #f0c04a;
+    filter: drop-shadow(0 0 3px rgba(240, 192, 74, 0.5));
 }
 
 .sev-anomalous {
-    fill: var(--red);
-    filter: drop-shadow(0 0 4px var(--red));
+    fill: #ff6b70;
+    filter: drop-shadow(0 0 6px var(--red));
 }
 
 .sev-disconnected {
     fill: var(--grey);
-    opacity: 0.6;
+    opacity: 0.7;
 }
 
 .node-group.dimmed .node,
 .node-group.dimmed .node-hit {
-    opacity: 0.1;
+    opacity: 0.18;
+    filter: grayscale(1) brightness(0.6) !important;
+}
+
+.node-group.dimmed .anomaly-ring,
+.node-group.dimmed .detect-flash,
+.node-group.dimmed .lockon-ring {
+    opacity: 0 !important;
 }
 
 .node-group.dimmed {
@@ -567,7 +687,6 @@ body {
     }
 }
 
-/* flashes exactly when the sweep line crosses this node's bearing */
 .detect-flash {
     fill: none;
     stroke: var(--accent);
@@ -621,9 +740,11 @@ body {
     opacity: 1;
 }
 
+/* Legend — now unmistakably shows which severities are active vs hidden */
 .constellation-legend {
     display: flex;
-    gap: 0.4rem;
+    align-items: center;
+    gap: 0.5rem;
     font-size: 0.68rem;
     letter-spacing: 0.05em;
     text-transform: uppercase;
@@ -638,9 +759,11 @@ body {
     cursor: pointer;
     display: inline-flex;
     align-items: center;
-    padding: 0.15rem 0.4rem;
+    padding: 0.2rem 0.5rem;
     border-radius: 2px;
-    transition: opacity 0.12s ease, background 0.12s ease;
+    border-bottom: 2px solid transparent;
+    color: var(--text);
+    transition: all 0.12s ease;
     user-select: none;
 }
 
@@ -649,7 +772,14 @@ body {
     }
 
     .legend-item.legend-off {
-        opacity: 0.35;
+        color: var(--muted);
+        text-decoration: line-through;
+        text-decoration-color: var(--border-bright);
+        opacity: 0.6;
+    }
+
+    .legend-item:not(.legend-off) {
+        border-bottom-color: currentColor;
     }
 
 .dot {
@@ -657,8 +787,27 @@ body {
     width: 7px;
     height: 7px;
     border-radius: 50%;
-    margin-right: 0.3rem;
+    margin-right: 0.35rem;
 }
+
+.legend-item.legend-off .dot {
+    filter: grayscale(1);
+    opacity: 0.5;
+}
+
+.legend-reset {
+    margin-left: auto;
+    cursor: pointer;
+    color: var(--accent);
+    font-size: 0.68rem;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    padding: 0.2rem 0.5rem;
+}
+
+    .legend-reset:hover {
+        text-decoration: underline;
+    }
 
 /* Detail panel */
 .detail-panel h3 {
