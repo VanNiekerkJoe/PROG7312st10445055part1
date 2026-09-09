@@ -62,7 +62,7 @@
 @code {
     [Parameter, EditorRequired] public TelemetryApiClient ApiClient { get; set; } = null!;
     [Parameter] public EventCallback OnClose { get; set; }
-    [Parameter] public EventCallback OnRegistered { get; set; }
+    [Parameter] public EventCallback<DeviceStatus> OnRegistered { get; set; } // Changed to pass the new device
 
     private List<(string Id, string Path)> _subZones = [];
     private string _selectedSubZoneId = "";
@@ -73,14 +73,29 @@
     private string? _message;
     private bool _success;
 
+    // Cache the tree to avoid repeated API calls
+    private static List<(string Id, string Path)>? _cachedSubZones;
+    private static DateTime _cacheTime = DateTime.MinValue;
+    private static readonly TimeSpan _cacheDuration = TimeSpan.FromMinutes(5);
+
     protected override async Task OnInitializedAsync()
     {
-        var tree = await ApiClient.GetTreeAsync();
-        if (tree is not null)
+        // Use cached tree if available and fresh
+        if (_cachedSubZones is not null && DateTime.Now - _cacheTime < _cacheDuration)
         {
-            var results = new List<(string, string)>();
-            CollectSubZones(tree, "", results);
-            _subZones = results;
+            _subZones = _cachedSubZones;
+        }
+        else
+        {
+            var tree = await ApiClient.GetTreeAsync();
+            if (tree is not null)
+            {
+                var results = new List<(string, string)>();
+                CollectSubZones(tree, "", results);
+                _subZones = results;
+                _cachedSubZones = results;
+                _cacheTime = DateTime.Now;
+            }
         }
     }
 
@@ -128,15 +143,35 @@
         else if (result.IsValid)
         {
             _success = true;
-            _message = "Device registered.";
+            _message = "✅ Device registered successfully!";
+            
+            // Create a basic device status from the registration data
+            var newDevice = new DeviceStatus
+            {
+                DeviceId = _macAddress,
+                ZoneName = _selectedSubZoneId, // Will be resolved by the parent
+                Category = _category,
+                Severity = AnomalySeverity.Healthy,
+                LastValue = 0,
+                ZScore = 0,
+                ThroughputLastMinute = 0,
+                LastSeen = DateTimeOffset.UtcNow
+            };
+            
+            // Pass the new device back to parent so it can add it immediately
+            await OnRegistered.InvokeAsync(newDevice);
+            
+            // Clear form for next registration
             _macAddress = "";
             _locationDescription = "";
-            await OnRegistered.InvokeAsync();
+            
+            // Don't close - let user register another
+            StateHasChanged();
         }
         else
         {
             _success = false;
-            _message = string.Join(" ", result.Errors);
+            _message = "❌ " + string.Join(" ", result.Errors);
         }
     }
 }

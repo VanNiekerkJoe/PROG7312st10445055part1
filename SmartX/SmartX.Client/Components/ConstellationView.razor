@@ -124,6 +124,7 @@ else
     [Parameter] public string? SelectedDeviceId { get; set; }
     [Parameter] public string? HighlightZone { get; set; }
     [Parameter] public EventCallback OnResetFilters { get; set; }
+    [Parameter] public bool ForceSpawnAll { get; set; }
 
     private const double SweepDurationSeconds = 6.0;
     private readonly HashSet<AnomalySeverity> _hiddenSeverities = [];
@@ -134,8 +135,29 @@ else
     protected override void OnParametersSet()
     {
         var currentIds = Devices.Select(d => d.DeviceId).ToHashSet();
-        _spawnIds = currentIds.Except(_knownDeviceIds).ToHashSet();
-        _knownDeviceIds.UnionWith(currentIds);
+        
+        if (ForceSpawnAll)
+        {
+            // Force all devices to appear as "new" with spawn animation
+            _spawnIds = currentIds.ToHashSet();
+            _knownDeviceIds.Clear();
+            _knownDeviceIds.UnionWith(currentIds);
+            ForceSpawnAll = false; // Reset after one use
+        }
+        else
+        {
+            _spawnIds = currentIds.Except(_knownDeviceIds).ToHashSet();
+            _knownDeviceIds.UnionWith(currentIds);
+        }
+    }
+
+    // Public method to manually trigger spawn animations on all devices
+    public void TriggerSpawnForAll()
+    {
+        _spawnIds = Devices.Select(d => d.DeviceId).ToHashSet();
+        _knownDeviceIds.Clear();
+        _knownDeviceIds.UnionWith(_spawnIds);
+        StateHasChanged();
     }
 
     private List<(DeviceStatus Device, NodePoint Point)> Layout =>
