@@ -14,8 +14,26 @@
         <button class="registration-toggle-btn" @onclick="() => _showRegistrationForm = !_showRegistrationForm">
             + Register sensor
         </button>
-        @* DEV-ONLY: delete this button + LoadTestNodes() before submission *@
-        <button class="test-data-btn" @onclick="LoadTestNodes">+ Test nodes</button>
+        @* DEV-ONLY: Stop seeder and clear all *@
+        <button class="test-data-btn" @onclick="StopSeederAndClearAll" style="color: var(--red); border-color: var(--red);">
+            ⏹ Stop seeder & clear all
+        </button>
+        @* DEV-ONLY: Start seeder *@
+        <button class="test-data-btn" @onclick="StartSeeder" style="color: var(--green); border-color: var(--green);">
+            ▶ Start seeder
+        </button>
+        @* DEV-ONLY: Clear test data *@
+        <button class="test-data-btn" @onclick="ClearTestDevices" style="color: var(--orange); border-color: var(--orange);">
+            ✕ Clear test data
+        </button>
+        @* DEV-ONLY: Load test data *@
+        <button class="test-data-btn" @onclick="LoadTestNodes">
+            + Load test data
+        </button>
+        @* DEV-ONLY: Reload from API *@
+        <button class="test-data-btn" @onclick="ReloadFromApi" style="color: var(--accent); border-color: var(--accent-dim);">
+            🔄 Reload from API
+        </button>
     </header>
     <div class="metric-row">
         <MetricCard Label="Active sensors" Value="@_activeSensors.ToString()" />
@@ -51,9 +69,12 @@
     </div>
     <AlertTimeline Events="_alertEvents" />
 </div>
+
 @code {
     private readonly Dictionary<string, DeviceStatus> _statusByDevice = new();
     private readonly List<AlertTimeline.AlertEvent> _alertEvents = [];
+    private readonly HashSet<string> _testDeviceIds = new();
+    private readonly HashSet<string> _knownTestDeviceIds = new();
     private const int MaxAlertEvents = 40;
     private List<DeviceStatus> _devices = [];
     private List<ZoneList.ZoneSummary> _zoneSummaries = [];
@@ -65,120 +86,337 @@
     private int _disconnectedCount;
     private int _throughputPerMinute;
     private ConstellationView? _constellationView;
+    private bool _ignoreSignalRUpdates = false;
+    private bool _hasTestData = false;
+    private bool _seederRunning = true;
+    private bool _isInitialized = false;
+    private bool _loadFromApiOnInit = true; // Set to false to prevent auto-loading
 
     protected override async Task OnInitializedAsync()
     {
-        var initial = await Api.GetAllStatusesAsync();
-        foreach (var status in initial)
+        try
         {
-            _statusByDevice[status.DeviceId] = status;
+            // Get seeder status
+            var status = await Api.GetSeederStatusAsync();
+            _seederRunning = status?.IsRunning ?? true;
+            
+            // Only load from API if enabled
+            if (_loadFromApiOnInit)
+            {
+                var initial = await Api.GetAllStatusesAsync();
+                foreach (var device in initial)
+                {
+                    _statusByDevice[device.DeviceId] = device;
+                }
+            }
+            
+            Recompute();
+            Hub.StatusUpdated += OnStatusUpdated;
+            await Hub.EnsureStartedAsync();
+            _isInitialized = true;
         }
-        Recompute();
-        Hub.StatusUpdated += OnStatusUpdated;
-        await Hub.EnsureStartedAsync();
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error initializing: {ex.Message}");
+        }
     }
 
     private void OnStatusUpdated(DeviceStatus status)
     {
-        _statusByDevice[status.DeviceId] = status;
-        if (status.Severity is AnomalySeverity.Anomalous or AnomalySeverity.Elevated or AnomalySeverity.Disconnected)
+        if (_ignoreSignalRUpdates) return;
+        
+        try
         {
-            _alertEvents.Add(new AlertTimeline.AlertEvent(status.DeviceId, status.Severity, status.LastSeen));
-            if (_alertEvents.Count > MaxAlertEvents)
+            // Don't override test data with API updates if we have test data loaded
+            if (_hasTestData && _testDeviceIds.Contains(status.DeviceId))
             {
-                _alertEvents.RemoveAt(0);
+                // Keep our test data, don't override with API data
+                return;
             }
+            
+            _statusByDevice[status.DeviceId] = status;
+            if (status.Severity is AnomalySeverity.Anomalous or AnomalySeverity.Elevated or AnomalySeverity.Disconnected)
+            {
+                _alertEvents.Add(new AlertTimeline.AlertEvent(status.DeviceId, status.Severity, status.LastSeen));
+                if (_alertEvents.Count > MaxAlertEvents)
+                {
+                    _alertEvents.RemoveAt(0);
+                }
+            }
+            Recompute();
+            InvokeAsync(StateHasChanged);
         }
-        Recompute();
-        InvokeAsync(StateHasChanged);
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error in OnStatusUpdated: {ex.Message}");
+        }
     }
 
     private void Recompute()
     {
-        _devices = _statusByDevice.Values.ToList();
-        _activeSensors = _devices.Count;
-        _anomalyCount = _devices.Count(d => d.Severity == AnomalySeverity.Anomalous);
-        _disconnectedCount = _devices.Count(d => d.Severity == AnomalySeverity.Disconnected);
-        _throughputPerMinute = _devices.Sum(d => d.ThroughputLastMinute);
-        _zoneSummaries = _devices
-            .GroupBy(d => d.ZoneName)
-            .Select(g => new ZoneList.ZoneSummary(g.Key, g.Max(d => d.Severity)))
-            .OrderBy(z => z.Name)
-            .ToList();
-        if (_selected is not null && _statusByDevice.TryGetValue(_selected.DeviceId, out var refreshed))
+        try
         {
-            _selected = refreshed;
+            _devices = _statusByDevice.Values.ToList();
+            _activeSensors = _devices.Count;
+            _anomalyCount = _devices.Count(d => d.Severity == AnomalySeverity.Anomalous);
+            _disconnectedCount = _devices.Count(d => d.Severity == AnomalySeverity.Disconnected);
+            _throughputPerMinute = _devices.Sum(d => d.ThroughputLastMinute);
+            _zoneSummaries = _devices
+                .GroupBy(d => d.ZoneName)
+                .Select(g => new ZoneList.ZoneSummary(g.Key, g.Max(d => d.Severity)))
+                .OrderBy(z => z.Name)
+                .ToList();
+            if (_selected is not null && _statusByDevice.TryGetValue(_selected.DeviceId, out var refreshed))
+            {
+                _selected = refreshed;
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error in Recompute: {ex.Message}");
         }
     }
 
     private void OnDeviceSelected(DeviceStatus device) => _selected = device;
+    
     private void OnZoneClicked(string zoneName) => _highlightZone = _highlightZone == zoneName ? null : zoneName;
 
-    // Handle device registration - adds the new device immediately
     private async Task OnDeviceRegistered(DeviceStatus newDevice)
     {
-        _showRegistrationForm = false; // Close the form
-        
-        // Add the new device to the dictionary
-        _statusByDevice[newDevice.DeviceId] = newDevice;
-        
-        // Refresh the display
-        Recompute();
-        StateHasChanged();
-        
-        // Trigger spawn animation on the new node
-        if (_constellationView is not null)
+        try
         {
-            // Force the new device to spawn with animation
-            await Task.Delay(100); // Small delay to ensure DOM updates
-            _constellationView.TriggerSpawnForDevice(newDevice.DeviceId);
+            _showRegistrationForm = false;
+            _statusByDevice[newDevice.DeviceId] = newDevice;
+            Recompute();
+            StateHasChanged();
+            
+            if (_constellationView is not null)
+            {
+                await Task.Delay(100);
+                _constellationView.TriggerSpawnForDevice(newDevice.DeviceId);
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error in OnDeviceRegistered: {ex.Message}");
         }
     }
 
-    // DEV-ONLY: populates the scope with a fixed, varied set of fake devices so you can see
-    // every severity state, multiple zones, and the interactions (click, lock-on, filters,
-    // zone highlight) without the API/SignalR seeder running. Safe to delete before submission.
+    // Reload from API manually
+    private async Task ReloadFromApi()
+    {
+        try
+        {
+            var devices = await Api.GetAllStatusesAsync();
+            _statusByDevice.Clear();
+            foreach (var device in devices)
+            {
+                _statusByDevice[device.DeviceId] = device;
+            }
+            _hasTestData = false;
+            _testDeviceIds.Clear();
+            _knownTestDeviceIds.Clear();
+            Recompute();
+            StateHasChanged();
+            Console.WriteLine($"Loaded {devices.Count} devices from API");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error reloading from API: {ex.Message}");
+        }
+    }
+
+    // Start the seeder
+    private async Task StartSeeder()
+    {
+        try
+        {
+            var started = await Api.StartSeederAsync();
+            if (started)
+            {
+                _seederRunning = true;
+                Console.WriteLine("Seeder started successfully");
+            }
+            else
+            {
+                Console.WriteLine("Failed to start seeder");
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error starting seeder: {ex.Message}");
+        }
+    }
+
+    // Stop seeder AND clear all devices
+    private async Task StopSeederAndClearAll()
+    {
+        try
+        {
+            _ignoreSignalRUpdates = true;
+            
+            // Stop the seeder
+            var stopped = await Api.StopSeederAsync();
+            if (stopped)
+            {
+                _seederRunning = false;
+                Console.WriteLine("Seeder stopped successfully");
+            }
+            else
+            {
+                Console.WriteLine("Failed to stop seeder, continuing with clear");
+            }
+            
+            // Wait a moment for any pending messages
+            await Task.Delay(500);
+            
+            // Clear ALL devices
+            _statusByDevice.Clear();
+            _testDeviceIds.Clear();
+            _knownTestDeviceIds.Clear();
+            _alertEvents.Clear();
+            _selected = null;
+            _hasTestData = false;
+            
+            Recompute();
+            StateHasChanged();
+            
+            Console.WriteLine("All devices cleared");
+            
+            // Re-enable updates
+            await Task.Delay(500);
+            _ignoreSignalRUpdates = false;
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error in StopSeederAndClearAll: {ex.Message}");
+            _ignoreSignalRUpdates = false;
+        }
+    }
+
+    // Clear ONLY test devices
+    private async Task ClearTestDevices()
+    {
+        try
+        {
+            _ignoreSignalRUpdates = true;
+            
+            // Stop the seeder temporarily
+            await Api.StopSeederAsync();
+            _seederRunning = false;
+            
+            // Wait for pending messages
+            await Task.Delay(500);
+            
+            foreach (var deviceId in _knownTestDeviceIds.ToList())
+            {
+                if (_statusByDevice.ContainsKey(deviceId))
+                {
+                    _statusByDevice.Remove(deviceId);
+                    Console.WriteLine($"Removed test device: {deviceId}");
+                }
+            }
+            
+            _testDeviceIds.Clear();
+            _hasTestData = false;
+            
+            if (_selected is not null && _knownTestDeviceIds.Contains(_selected.DeviceId))
+            {
+                _selected = null;
+            }
+            
+            _alertEvents.RemoveAll(e => _knownTestDeviceIds.Contains(e.DeviceId));
+            
+            Recompute();
+            StateHasChanged();
+            
+            Console.WriteLine($"Cleared all test devices");
+            
+            await Task.Delay(500);
+            _ignoreSignalRUpdates = false;
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error in ClearTestDevices: {ex.Message}");
+            _ignoreSignalRUpdates = false;
+        }
+    }
+
+    // DEV-ONLY: Load test data matching the API's seed data
     private void LoadTestNodes()
     {
-        var now = DateTimeOffset.UtcNow;
-        var testDevices = new[]
+        try
         {
-            new DeviceStatus { DeviceId = "A1-TEMP-01", ZoneName = "Zone A", Category = SensorCategory.Environmental, Severity = AnomalySeverity.Healthy,      LastValue = 22.4,  ZScore = 0.3,  ThroughputLastMinute = 12, LastSeen = now },
-            new DeviceStatus { DeviceId = "A1-TEMP-02", ZoneName = "Zone A", Category = SensorCategory.Environmental, Severity = AnomalySeverity.Healthy,      LastValue = 21.9,  ZScore = 0.1,  ThroughputLastMinute = 11, LastSeen = now },
-            new DeviceStatus { DeviceId = "A2-HUM-01",  ZoneName = "Zone A", Category = SensorCategory.Environmental, Severity = AnomalySeverity.Elevated,     LastValue = 68.2,  ZScore = 1.9,  ThroughputLastMinute = 9,  LastSeen = now },
-            new DeviceStatus { DeviceId = "B1-PRES-01", ZoneName = "Zone B", Category = SensorCategory.Environmental, Severity = AnomalySeverity.Healthy,      LastValue = 101.3, ZScore = 0.2,  ThroughputLastMinute = 14, LastSeen = now },
-            new DeviceStatus { DeviceId = "B1-PRES-02", ZoneName = "Zone B", Category = SensorCategory.Environmental, Severity = AnomalySeverity.Anomalous,    LastValue = 87.1,  ZScore = 4.6,  ThroughputLastMinute = 3,  LastSeen = now },
-            new DeviceStatus { DeviceId = "B2-VIB-01",  ZoneName = "Zone B", Category = SensorCategory.Environmental, Severity = AnomalySeverity.Elevated,     LastValue = 4.7,   ZScore = 2.1,  ThroughputLastMinute = 10, LastSeen = now },
-            new DeviceStatus { DeviceId = "B2-VIB-02",  ZoneName = "Zone B", Category = SensorCategory.Environmental, Severity = AnomalySeverity.Healthy,      LastValue = 1.2,   ZScore = 0.4,  ThroughputLastMinute = 13, LastSeen = now },
-            new DeviceStatus { DeviceId = "C1-FLOW-01", ZoneName = "Zone C", Category = SensorCategory.Environmental, Severity = AnomalySeverity.Disconnected, LastValue = 0.0,   ZScore = 0.0,  ThroughputLastMinute = 0,  LastSeen = now.AddMinutes(-14) },
-            new DeviceStatus { DeviceId = "C1-FLOW-02", ZoneName = "Zone C", Category = SensorCategory.Environmental, Severity = AnomalySeverity.Healthy,      LastValue = 5.3,   ZScore = 0.6,  ThroughputLastMinute = 12, LastSeen = now },
-            new DeviceStatus { DeviceId = "C2-TEMP-01", ZoneName = "Zone C", Category = SensorCategory.Environmental, Severity = AnomalySeverity.Anomalous,    LastValue = 41.8,  ZScore = 5.2,  ThroughputLastMinute = 2,  LastSeen = now },
-            new DeviceStatus { DeviceId = "C2-TEMP-02", ZoneName = "Zone C", Category = SensorCategory.Environmental, Severity = AnomalySeverity.Healthy,      LastValue = 23.1,  ZScore = 0.2,  ThroughputLastMinute = 11, LastSeen = now },
-            new DeviceStatus { DeviceId = "C3-HUM-01",  ZoneName = "Zone C", Category = SensorCategory.Environmental, Severity = AnomalySeverity.Disconnected, LastValue = 0.0,   ZScore = 0.0,  ThroughputLastMinute = 0,  LastSeen = now.AddMinutes(-31) },
-            new DeviceStatus { DeviceId = "A3-CO2-01",  ZoneName = "Zone A", Category = SensorCategory.Environmental, Severity = AnomalySeverity.Healthy,      LastValue = 612,   ZScore = 0.5,  ThroughputLastMinute = 10, LastSeen = now },
-            new DeviceStatus { DeviceId = "A3-CO2-02",  ZoneName = "Zone A", Category = SensorCategory.Environmental, Severity = AnomalySeverity.Elevated,     LastValue = 940,   ZScore = 2.3,  ThroughputLastMinute = 8,  LastSeen = now },
-        };
+            var now = DateTimeOffset.UtcNow;
+            
+            var testDevices = new[]
+            {
+                // Zone A - Sub-Zone A1 (Hydroponic Bay)
+                new DeviceStatus { DeviceId = "ZA-SUB1-DEV1", ZoneName = "Zone A", Category = SensorCategory.Environmental, Severity = AnomalySeverity.Healthy, LastValue = 22.4, ZScore = 0.3, ThroughputLastMinute = 12, LastSeen = now },
+                new DeviceStatus { DeviceId = "ZA-SUB1-DEV2", ZoneName = "Zone A", Category = SensorCategory.Environmental, Severity = AnomalySeverity.Healthy, LastValue = 21.9, ZScore = 0.1, ThroughputLastMinute = 11, LastSeen = now },
+                new DeviceStatus { DeviceId = "ZA-SUB1-DEV3", ZoneName = "Zone A", Category = SensorCategory.Environmental, Severity = AnomalySeverity.Elevated, LastValue = 68.2, ZScore = 1.9, ThroughputLastMinute = 9, LastSeen = now },
+                new DeviceStatus { DeviceId = "ZA-SUB1-DEV4", ZoneName = "Zone A", Category = SensorCategory.Environmental, Severity = AnomalySeverity.Healthy, LastValue = 23.1, ZScore = 0.2, ThroughputLastMinute = 11, LastSeen = now },
+                
+                // Zone B - Sub-Zone B1 (Utility Room)
+                new DeviceStatus { DeviceId = "ZB-SUB1-DEV1", ZoneName = "Zone B", Category = SensorCategory.Power, Severity = AnomalySeverity.Healthy, LastValue = 220.5, ZScore = 0.2, ThroughputLastMinute = 14, LastSeen = now },
+                new DeviceStatus { DeviceId = "ZB-SUB1-DEV2", ZoneName = "Zone B", Category = SensorCategory.Power, Severity = AnomalySeverity.Elevated, LastValue = 235.1, ZScore = 2.1, ThroughputLastMinute = 10, LastSeen = now },
+                new DeviceStatus { DeviceId = "ZB-SUB1-DEV3", ZoneName = "Zone B", Category = SensorCategory.Power, Severity = AnomalySeverity.Anomalous, LastValue = 280.7, ZScore = 4.6, ThroughputLastMinute = 3, LastSeen = now },
+                
+                // Zone B - Sub-Zone B2 (Valve Bank)
+                new DeviceStatus { DeviceId = "ZB-SUB2-DEV1", ZoneName = "Zone B", Category = SensorCategory.Actuator, Severity = AnomalySeverity.Healthy, LastValue = 1.2, ZScore = 0.4, ThroughputLastMinute = 13, LastSeen = now },
+                new DeviceStatus { DeviceId = "ZB-SUB2-DEV2", ZoneName = "Zone B", Category = SensorCategory.Actuator, Severity = AnomalySeverity.Healthy, LastValue = 0.9, ZScore = 0.3, ThroughputLastMinute = 12, LastSeen = now },
+                new DeviceStatus { DeviceId = "ZB-SUB2-DEV3", ZoneName = "Zone B", Category = SensorCategory.Actuator, Severity = AnomalySeverity.Disconnected, LastValue = 0.0, ZScore = 0.0, ThroughputLastMinute = 0, LastSeen = now.AddMinutes(-14) },
+                
+                // Zone C - Sub-Zone C1 (Grid Substation)
+                new DeviceStatus { DeviceId = "ZC-SUB1-DEV1", ZoneName = "Zone C", Category = SensorCategory.Power, Severity = AnomalySeverity.Healthy, LastValue = 218.3, ZScore = 0.5, ThroughputLastMinute = 10, LastSeen = now },
+                new DeviceStatus { DeviceId = "ZC-SUB1-DEV2", ZoneName = "Zone C", Category = SensorCategory.Power, Severity = AnomalySeverity.Elevated, LastValue = 245.6, ZScore = 2.3, ThroughputLastMinute = 8, LastSeen = now },
+                new DeviceStatus { DeviceId = "ZC-SUB1-DEV3", ZoneName = "Zone C", Category = SensorCategory.Power, Severity = AnomalySeverity.Anomalous, LastValue = 310.2, ZScore = 5.2, ThroughputLastMinute = 2, LastSeen = now },
+                new DeviceStatus { DeviceId = "ZC-SUB1-DEV4", ZoneName = "Zone C", Category = SensorCategory.Power, Severity = AnomalySeverity.Disconnected, LastValue = 0.0, ZScore = 0.0, ThroughputLastMinute = 0, LastSeen = now.AddMinutes(-31) },
+            };
 
-        // Clear existing devices
-        _statusByDevice.Clear();
-        
-        foreach (var device in testDevices)
-        {
-            _statusByDevice[device.DeviceId] = device;
+            // Clear existing test devices first
+            foreach (var deviceId in _knownTestDeviceIds.ToList())
+            {
+                _statusByDevice.Remove(deviceId);
+            }
+            _testDeviceIds.Clear();
+            _knownTestDeviceIds.Clear();
+
+            foreach (var device in testDevices)
+            {
+                _testDeviceIds.Add(device.DeviceId);
+                _knownTestDeviceIds.Add(device.DeviceId);
+                _statusByDevice[device.DeviceId] = device;
+            }
+            
+            _hasTestData = true;
+            
+            Recompute();
+            
+            if (_constellationView is not null)
+            {
+                _constellationView.TriggerSpawnForAll();
+            }
+            
+            StateHasChanged();
+            Console.WriteLine($"Loaded {testDevices.Length} test devices");
         }
-        
-        Recompute();
-        
-        // Trigger spawn animation on all nodes
-        if (_constellationView is not null)
+        catch (Exception ex)
         {
-            _constellationView.TriggerSpawnForAll();
+            Console.WriteLine($"Error in LoadTestNodes: {ex.Message}");
         }
     }
 
     public async ValueTask DisposeAsync()
     {
-        Hub.StatusUpdated -= OnStatusUpdated;
+        try
+        {
+            Hub.StatusUpdated -= OnStatusUpdated;
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error in Dispose: {ex.Message}");
+        }
         await ValueTask.CompletedTask;
     }
 }

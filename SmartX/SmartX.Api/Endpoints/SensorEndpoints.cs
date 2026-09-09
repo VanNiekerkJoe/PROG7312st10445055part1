@@ -1,6 +1,7 @@
 using SmartX.Api.Services;
 using SmartX.Core.Devices;
 using SmartX.Core.Telemetry;
+using Microsoft.AspNetCore.Mvc;
 
 namespace SmartX.Api.Endpoints;
 
@@ -68,5 +69,25 @@ public static class SensorEndpoints
             var added = registry.AddAttachment(deviceId, file.FileName);
             return added ? Results.Ok(new { file.FileName }) : Results.NotFound($"Device '{deviceId}' was not found.");
         }).DisableAntiforgery();
+
+        // DEV-ONLY: Stop the telemetry seeder - ADD [FromServices] ATTRIBUTE
+        group.MapPost("/seeder/stop", async ([FromServices] TelemetrySeeder seeder) =>
+        {
+            await seeder.StopSeedingAsync();
+            return Results.Ok(new { message = "Seeder stopped" });
+        });
+
+        // DEV-ONLY: Start the telemetry seeder - ADD [FromServices] ATTRIBUTE
+        group.MapPost("/seeder/start", async ([FromServices] TelemetrySeeder seeder) =>
+        {
+            await seeder.StartSeedingAsync();
+            return Results.Ok(new { message = "Seeder started" });
+        });
+
+        // DEV-ONLY: Get seeder status - ADD [FromServices] ATTRIBUTE
+        group.MapGet("/seeder/status", ([FromServices] TelemetrySeeder seeder) =>
+        {
+            return Results.Ok(new { isRunning = seeder.IsRunning });
+        });
     }
 }

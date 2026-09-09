@@ -5,17 +5,45 @@ namespace SmartX.Client.Services;
 
 public sealed record RegisterDeviceRequest(string ParentSubZoneId, string MacAddress, SensorCategory Category, string LocationDescription);
 
+public sealed record SeederStatusResponse(bool IsRunning);
+
 /// <summary>Thin wrapper around the SmartX.Api REST endpoints.</summary>
-public sealed class TelemetryApiClient(string baseAddress)
+public sealed class TelemetryApiClient
 {
-    private readonly HttpClient _http = new() { BaseAddress = new Uri(baseAddress) };
+    private readonly HttpClient _http;
 
-    public async Task<List<DeviceStatus>> GetAllStatusesAsync(CancellationToken ct = default) =>
-        await _http.GetFromJsonAsync<List<DeviceStatus>>("/api/sensors", ct) ?? [];
+    public TelemetryApiClient(string baseAddress)
+    {
+        _http = new HttpClient { BaseAddress = new Uri(baseAddress) };
+        _http.Timeout = TimeSpan.FromSeconds(30);
+    }
 
-    public async Task<TreeNodeDto?> GetTreeAsync(CancellationToken ct = default) =>
-        await _http.GetFromJsonAsync<TreeNodeDto>("/api/sensors/tree", ct);
-                        
+    public async Task<List<DeviceStatus>> GetAllStatusesAsync(CancellationToken ct = default)
+    {
+        try
+        {
+            return await _http.GetFromJsonAsync<List<DeviceStatus>>("/api/sensors", ct) ?? [];
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error getting statuses: {ex.Message}");
+            return [];
+        }
+    }
+
+    public async Task<TreeNodeDto?> GetTreeAsync(CancellationToken ct = default)
+    {
+        try
+        {
+            return await _http.GetFromJsonAsync<TreeNodeDto>("/api/sensors/tree", ct);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error getting tree: {ex.Message}");
+            return null;
+        }
+    }
+
     public async Task<ValidationResultDto?> ValidateTreeAsync(CancellationToken ct = default) =>
         await _http.GetFromJsonAsync<ValidationResultDto>("/api/sensors/validate", ct);
 
@@ -34,5 +62,44 @@ public sealed class TelemetryApiClient(string baseAddress)
         content.Add(streamContent, "file", fileName);
         var response = await _http.PostAsync($"/api/sensors/{deviceId}/attachments", content, ct);
         return response.IsSuccessStatusCode;
+    }
+
+    // DEV-ONLY: Control the telemetry seeder
+    public async Task<bool> StopSeederAsync(CancellationToken ct = default)
+    {
+        try
+        {
+            var response = await _http.PostAsync("/api/sensors/seeder/stop", null, ct);
+            return response.IsSuccessStatusCode;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    public async Task<bool> StartSeederAsync(CancellationToken ct = default)
+    {
+        try
+        {
+            var response = await _http.PostAsync("/api/sensors/seeder/start", null, ct);
+            return response.IsSuccessStatusCode;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    public async Task<SeederStatusResponse?> GetSeederStatusAsync(CancellationToken ct = default)
+    {
+        try
+        {
+            return await _http.GetFromJsonAsync<SeederStatusResponse>("/api/sensors/seeder/status", ct);
+        }
+        catch
+        {
+            return new SeederStatusResponse(true);
+        }
     }
 }

@@ -19,6 +19,59 @@ public sealed class TelemetrySeeder(SensorRegistry registry, IHubContext<Telemet
     private const int TicksPerThroughputWindow = 30; // ~60s at a 2s tick
 
     private readonly Random _random = new();
+    private bool _isRunning = true;
+    private readonly SemaphoreSlim _semaphore = new(1, 1);
+    private CancellationTokenSource? _stoppingTokenSource;
+
+    public bool IsRunning
+    {
+        get { lock (this) { return _isRunning; } }
+    }
+
+    public async Task StopSeedingAsync()
+    {
+        await _semaphore.WaitAsync();
+        try
+        {
+            if (!_isRunning) return;
+            _isRunning = false;
+            _stoppingTokenSource?.Cancel();
+            logger.LogInformation("Telemetry seeder stopped.");
+        }
+        finally
+        {
+            _semaphore.Release();
+        }
+    }
+
+    public async Task StartSeedingAsync()
+    {
+        await _semaphore.WaitAsync();
+        try
+        {
+            if (_isRunning) return;
+            _isRunning = true;
+            _stoppingTokenSource = new CancellationTokenSource();
+            // Restart the background service
+            _ = Task.Run(() => ExecuteAsync(_stoppingTokenSource.Token));
+            logger.LogInformation("Telemetry seeder started.");
+        }
+        finally
+        {
+            _semaphore.Release();
+        }
+    }
+
+    // Public sync methods for backward compatibility
+    public void StopSeeding()
+    {
+        _ = StopSeedingAsync();
+    }
+
+    public void StartSeeding()
+    {
+        _ = StartSeedingAsync();
+    }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -30,6 +83,24 @@ public sealed class TelemetrySeeder(SensorRegistry registry, IHubContext<Telemet
         var tick = 0;
         while (!stoppingToken.IsCancellationRequested)
         {
+            // Check if we should be running
+            bool shouldRun;
+            await _semaphore.WaitAsync();
+            try
+            {
+                shouldRun = _isRunning;
+            }
+            finally
+            {
+                _semaphore.Release();
+            }
+
+            if (!shouldRun)
+            {
+                await Task.Delay(100, stoppingToken);
+                continue;
+            }
+
             foreach (var device in devices)
             {
                 if (_random.NextDouble() < 0.05) continue; // simulate a device that didn't report this tick
