@@ -241,6 +241,63 @@ body {
     color: var(--border-bright);
 }
 
+/* ── Header action grouping: register button + a visually distinct,
+   muted "dev tools" cluster, so debug controls never compete with the
+   one real user-facing action for visual weight ── */
+.header-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    margin-left: auto;
+    flex-wrap: wrap;
+}
+
+.dev-tools {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    border: 1px dashed var(--border-bright);
+    border-radius: 2px;
+    padding: 0.3rem 0.5rem;
+}
+
+.dev-tools-label {
+    font-size: 0.62rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-right: 0.2rem;
+}
+
+.dev-btn {
+    font-family: var(--font-mono);
+    font-size: 0.7rem;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: var(--muted);
+    background: transparent;
+    border: 1px solid var(--border-bright);
+    border-radius: 2px;
+    padding: 0.35rem 0.6rem;
+    cursor: pointer;
+    transition: color 0.12s ease, border-color 0.12s ease;
+}
+
+    .dev-btn:hover:not(:disabled) {
+        color: var(--text);
+        border-color: var(--muted);
+    }
+
+    .dev-btn:disabled {
+        opacity: 0.4;
+        cursor: not-allowed;
+    }
+
+    .dev-btn.dev-btn-danger:hover:not(:disabled) {
+        color: var(--red);
+        border-color: var(--red);
+    }
+
 .test-data-btn {
     font-family: var(--font-mono);
     font-size: 0.7rem;
