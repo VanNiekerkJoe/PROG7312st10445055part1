@@ -11,9 +11,9 @@
     <!-- Versions track the .NET 10 GA release train. If `dotnet restore` reports
          a version mismatch against your installed SDK, bump these three to
          match the SDK version exactly (check with the dotnet version command). -->
-    <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly" Version="10.0.0" />
-    <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly.DevServer" Version="10.0.0" PrivateAssets="all" />
-    <PackageReference Include="Microsoft.AspNetCore.SignalR.Client" Version="10.0.0" />
+	  <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly" Version="10.0.12" />
+	  <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly.DevServer" Version="10.0.12" PrivateAssets="all" />
+	  <PackageReference Include="Microsoft.AspNetCore.SignalR.Client" Version="10.0.12" />
   </ItemGroup>
 
   <ItemGroup>
