@@ -114,6 +114,55 @@ public static class SensorEndpoints
             return added ? Results.Ok(new { file.FileName }) : Results.NotFound($"Device '{deviceId}' was not found.");
         }).DisableAntiforgery();
 
+        // Returns the attachment file names actually recorded against this
+        // device (the server-side source of truth), so the dashboard can
+        // show previously uploaded files for a device instead of only
+        // whatever was uploaded in the current browser session.
+        group.MapGet("/{deviceId}/attachments", (string deviceId, SensorRegistry registry) =>
+        {
+            var attachments = registry.GetAttachments(deviceId);
+            return attachments is null
+                ? Results.NotFound($"Device '{deviceId}' was not found.")
+                : Results.Ok(attachments);
+        });
+
+        // Serves a single attachment for viewing/downloading. Only file names
+        // already recorded against this device are served (checked via the
+        // registry, not just "does this path exist on disk") so one device's
+        // route can't be used to read another device's uploaded files, and
+        // Path.GetFileName strips any directory traversal segments from the
+        // requested name before it ever touches the filesystem.
+        group.MapGet("/{deviceId}/attachments/{fileName}", (string deviceId, string fileName, SensorRegistry registry) =>
+        {
+            var attachments = registry.GetAttachments(deviceId);
+            if (attachments is null)
+            {
+                return Results.NotFound($"Device '{deviceId}' was not found.");
+            }
+
+            var safeFileName = Path.GetFileName(fileName);
+            if (!attachments.Contains(safeFileName))
+            {
+                return Results.NotFound($"No attachment '{safeFileName}' recorded for device '{deviceId}'.");
+            }
+
+            var filePath = Path.Combine(AppContext.BaseDirectory, "uploads", deviceId, safeFileName);
+            if (!File.Exists(filePath))
+            {
+                return Results.NotFound("File was recorded but is missing from disk.");
+            }
+
+            var contentType = new Microsoft.AspNetCore.StaticFiles.FileExtensionContentTypeProvider()
+                .TryGetContentType(safeFileName, out var type)
+                ? type
+                : "application/octet-stream";
+
+            // enableRangeProcessing lets the browser preview large files
+            // (e.g. video/audio scrubbing, PDF viewers) instead of only
+            // supporting a single full-file download.
+            return Results.File(filePath, contentType, safeFileName, enableRangeProcessing: true);
+        });
+
         // DEV-ONLY: Stop the telemetry seeder - ADD [FromServices] ATTRIBUTE
         group.MapPost("/seeder/stop", async ([FromServices] TelemetrySeeder seeder) =>
         {

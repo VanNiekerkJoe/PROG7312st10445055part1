@@ -28,28 +28,36 @@
             </tbody>
         </table>
 
-        <label class="attachment-input">
-            Attach config / log / photo
-            <InputFile OnChange="OnFileSelected" />
-        </label>
-        @if (_uploading)
-        {
-            <p class="upload-status"><span class="spinner spinner-inline"></span> Uploading…</p>
-        }
-        else if (!string.IsNullOrEmpty(_uploadError))
-        {
-            <p class="upload-status upload-error">@_uploadError</p>
-        }
+        <div class="attachment-section" @key="Selected.DeviceId">
+            <label class="attachment-input">
+                Attach config / log / photo
+                <InputFile OnChange="OnFileSelected" />
+            </label>
+            @if (_uploading)
+            {
+                <p class="upload-status"><span class="spinner spinner-inline"></span> Uploading…</p>
+            }
+            else if (!string.IsNullOrEmpty(_uploadError))
+            {
+                <p class="upload-status upload-error">@_uploadError</p>
+            }
+            else if (_loadingAttachments)
+            {
+                <p class="upload-status"><span class="spinner spinner-inline"></span> Loading attachments…</p>
+            }
 
-        @if (_attachments.Count > 0)
-        {
-            <ul class="attachment-list">
-                @foreach (var name in _attachments)
-                {
-                    <li>📎 @name</li>
-                }
-            </ul>
-        }
+            @if (_attachments.Count > 0)
+            {
+                <ul class="attachment-list">
+                    @foreach (var name in _attachments)
+                    {
+                        <li>
+                            📎 <a href="@ApiClient?.GetAttachmentUrl(Selected.DeviceId, name)" target="_blank" rel="noopener">@name</a>
+                        </li>
+                    }
+                </ul>
+            }
+        </div>
     }
 </div>
 
@@ -59,19 +67,35 @@
     [Parameter] public EventCallback<string> OnRemoveDevice { get; set; }
 
     private bool _uploading;
+    private bool _loadingAttachments;
     private string? _uploadError;
     private string? _lastDeviceId;
     private readonly List<string> _attachments = [];
 
-    protected override void OnParametersSet()
+    protected override async Task OnParametersSetAsync()
     {
-        // Reset the session-local attachment list whenever the selection changes
-        // to a different device, so it doesn't carry over from the last one.
+        // Reload attachments from the server whenever the selection changes
+        // to a different device, instead of relying on a session-local list
+        // that forgets everything uploaded before the current page load.
         if (Selected?.DeviceId != _lastDeviceId)
         {
             _lastDeviceId = Selected?.DeviceId;
             _attachments.Clear();
             _uploadError = null;
+
+            if (Selected is not null && ApiClient is not null)
+            {
+                _loadingAttachments = true;
+                StateHasChanged();
+                var attachments = await ApiClient.GetAttachmentsAsync(Selected.DeviceId);
+                // Selection may have changed again while this await was in
+                // flight; only apply the result if it's still current.
+                if (Selected?.DeviceId == _lastDeviceId)
+                {
+                    _attachments.AddRange(attachments);
+                }
+                _loadingAttachments = false;
+            }
         }
     }
 

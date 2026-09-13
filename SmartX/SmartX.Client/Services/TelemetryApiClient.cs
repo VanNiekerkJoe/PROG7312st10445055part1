@@ -102,6 +102,29 @@ public sealed class TelemetryApiClient
         return response.IsSuccessStatusCode;
     }
 
+    /// <summary>
+    /// Fetches the attachment file names actually recorded against this
+    /// device on the server, so the panel can show attachments uploaded in
+    /// an earlier session (or before a page reload), not just ones uploaded
+    /// in the current session.
+    /// </summary>
+    public async Task<List<string>> GetAttachmentsAsync(string deviceId, CancellationToken ct = default)
+    {
+        try
+        {
+            return await _http.GetFromJsonAsync<List<string>>($"/api/sensors/{deviceId}/attachments", ct) ?? [];
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error getting attachments for '{deviceId}': {ex.Message}");
+            return [];
+        }
+    }
+
+    /// <summary>Absolute URL an &lt;a&gt; tag can open/download an attachment from directly.</summary>
+    public string GetAttachmentUrl(string deviceId, string fileName) =>
+        $"{_http.BaseAddress}api/sensors/{Uri.EscapeDataString(deviceId)}/attachments/{Uri.EscapeDataString(fileName)}";
+
     // DEV-ONLY: Control the telemetry seeder
     public async Task<bool> StopSeederAsync(CancellationToken ct = default)
     {

@@ -128,6 +128,21 @@ public sealed class SensorRegistry
     }
 
     /// <summary>
+    /// Returns the attachment file names recorded against this device, or
+    /// null if the device doesn't exist. Returns a copy (not the live list)
+    /// so callers can't mutate the registry's internal state.
+    /// </summary>
+    public IReadOnlyList<string>? GetAttachments(string deviceId)
+    {
+        if (!_deviceNodesById.TryGetValue(deviceId, out var node) || node.Sensor is null)
+        {
+            return null;
+        }
+
+        return node.Sensor.Attachments.ToList();
+    }
+
+    /// <summary>
     /// Removes a single device (by ID) from the deployment tree and purges
     /// every dictionary that keys off it (index, baseline, latest status,
     /// batcher, throughput counter). Without clearing all of these, a
