@@ -223,11 +223,17 @@ public sealed class SensorRegistry
     }
 
     /// <summary>
-    /// Records one raw reading for a device: pushes it through that device's
+    /// Records a normal reading for a device: pushes it through that device's
     /// jagged-array batcher, updates its rolling baseline, and produces the
-    /// DeviceStatus snapshot the constellation renders next.
+    /// DeviceStatus snapshot the constellation renders next. Overloaded below
+    /// with a simulateDisconnect flag for the seeder's occasional disconnect
+    /// scenario — two distinct signatures under the same method name,
+    /// resolved by the compiler at the call site (method overloading).
     /// </summary>
-    public DeviceStatus? RecordReading(string deviceId, float value, bool simulateDisconnect = false)
+    public DeviceStatus? RecordReading(string deviceId, float value) =>
+        RecordReading(deviceId, value, simulateDisconnect: false);
+
+    public DeviceStatus? RecordReading(string deviceId, float value, bool simulateDisconnect)
     {
         if (!_deviceNodesById.TryGetValue(deviceId, out var node) || node.Sensor is null)
         {
