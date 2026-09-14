@@ -87,7 +87,7 @@ public static class SensorEndpoints
             return Results.Ok(new { cleared = true });
         });
 
-        group.MapPost("/{deviceId}/attachments", async (string deviceId, HttpRequest request, SensorRegistry registry) =>
+        group.MapPost("/{deviceId}/attachments", async (string deviceId, HttpRequest request, SensorRegistry registry, AttachmentEncryptionService crypto) =>
         {
             if (!request.HasFormContentType)
             {
@@ -101,14 +101,20 @@ public static class SensorEndpoints
                 return Results.BadRequest("No file was uploaded.");
             }
 
+            byte[] plaintext;
+            using (var memoryStream = new MemoryStream())
+            {
+                await file.CopyToAsync(memoryStream);
+                plaintext = memoryStream.ToArray();
+            }
+
+            var encrypted = crypto.Encrypt(plaintext);
+
             var uploadsDir = Path.Combine(AppContext.BaseDirectory, "uploads", deviceId);
             Directory.CreateDirectory(uploadsDir);
             var targetPath = Path.Combine(uploadsDir, Path.GetFileName(file.FileName));
 
-            await using (var stream = File.Create(targetPath))
-            {
-                await file.CopyToAsync(stream);
-            }
+            await File.WriteAllBytesAsync(targetPath, encrypted);
 
             var added = registry.AddAttachment(deviceId, file.FileName);
             return added ? Results.Ok(new { file.FileName }) : Results.NotFound($"Device '{deviceId}' was not found.");
@@ -132,7 +138,7 @@ public static class SensorEndpoints
         // route can't be used to read another device's uploaded files, and
         // Path.GetFileName strips any directory traversal segments from the
         // requested name before it ever touches the filesystem.
-        group.MapGet("/{deviceId}/attachments/{fileName}", (string deviceId, string fileName, SensorRegistry registry) =>
+        group.MapGet("/{deviceId}/attachments/{fileName}", async (string deviceId, string fileName, SensorRegistry registry, AttachmentEncryptionService crypto) =>
         {
             var attachments = registry.GetAttachments(deviceId);
             if (attachments is null)
@@ -152,15 +158,17 @@ public static class SensorEndpoints
                 return Results.NotFound("File was recorded but is missing from disk.");
             }
 
+            var encrypted = await File.ReadAllBytesAsync(filePath);
+            var decrypted = crypto.Decrypt(encrypted);
+
             var contentType = new Microsoft.AspNetCore.StaticFiles.FileExtensionContentTypeProvider()
                 .TryGetContentType(safeFileName, out var type)
                 ? type
                 : "application/octet-stream";
 
-            // enableRangeProcessing lets the browser preview large files
-            // (e.g. video/audio scrubbing, PDF viewers) instead of only
-            // supporting a single full-file download.
-            return Results.File(filePath, contentType, safeFileName, enableRangeProcessing: true);
+            // enableRangeProcessing still works over an in-memory byte array —
+            // the browser can scrub/preview large files without a full re-download.
+            return Results.File(decrypted, contentType, safeFileName, enableRangeProcessing: true);
         });
 
         // DEV-ONLY: Stop the telemetry seeder - ADD [FromServices] ATTRIBUTE

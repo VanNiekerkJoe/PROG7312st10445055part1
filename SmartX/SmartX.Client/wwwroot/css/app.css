@@ -1065,3 +1065,60 @@ body {
         animation: none;
     }
 }
+
+/* ── Responsive breakpoints ──
+   Below this, the fixed 190px/1fr/240px three-column grid stops fitting
+   a real device or a narrow marker's window; collapse to a single column
+   with the constellation first (it's the primary content), then stack
+   zones and detail below it. */
+@media (max-width: 900px) {
+    .main-grid {
+        grid-template-columns: 1fr;
+    }
+
+        .main-grid > .panel:first-child {
+            order: 2;
+        }
+
+    .constellation-panel {
+        order: 1;
+    }
+
+    .main-grid > .panel:last-child {
+        order: 3;
+    }
+}
+
+@media (max-width: 640px) {
+    .metric-row {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .dashboard-header {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+
+    .header-actions {
+        margin-left: 0;
+        width: 100%;
+    }
+
+    .dev-tools {
+        flex-wrap: wrap;
+    }
+
+    .constellation-svg {
+        height: 220px;
+    }
+}
+
+@media (max-width: 420px) {
+    .metric-row {
+        grid-template-columns: 1fr;
+    }
+
+    .pillar-pills {
+        flex-wrap: wrap;
+    }
+}

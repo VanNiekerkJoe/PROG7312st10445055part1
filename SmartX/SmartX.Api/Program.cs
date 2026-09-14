@@ -20,6 +20,7 @@ builder.Services.AddEndpointsApiExplorer();
 
 // Single shared in-memory registry for the whole app lifetime.
 builder.Services.AddSingleton<SensorRegistry>();
+builder.Services.AddSingleton<AttachmentEncryptionService>();
 
 builder.Services.AddSingleton<TelemetrySeeder>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<TelemetrySeeder>());
