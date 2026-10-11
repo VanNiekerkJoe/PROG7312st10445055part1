@@ -234,11 +234,12 @@ puts the packet in the priority lane.
 ## Predictive Action and Recommendation Engine
 
 `SmartX.Core/Insights/ActionPatternEngine.cs` learns from operator behaviour with a first-order
-transition table: `context -> follow-up command -> count`. A context is an alert
+transition table: `context -> follow-up command -> timestamped evidence weight`. A context is an alert
 (`alert:Power:Anomalous`) or a search (`search:pump a`). Every manual command issued within
-90 seconds of a context bumps that pair's counter. Suggestions are ranked by
-**confidence = count / total** for the context, with a minimum support of 2 so one-offs are
-ignored. Three other sources feed the same panel:
+90 seconds of a context bumps that pair's evidence. Evidence decays exponentially with a
+7-day half-life, so old behavior gradually loses influence and can fall below the minimum
+effective support of 2. Suggestions are ranked by **confidence = recency-weighted evidence /
+total recency-weighted evidence** for the context. Three other sources feed the same panel:
 
 - **Rules** for cold start (e.g. anomalous Power -> Relay OFF) when nothing is learned yet;
 - **Watch-list** of devices that keep raising alerts (3+), shown as "Inspect ...";

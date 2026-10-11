@@ -7,14 +7,15 @@ namespace SmartX.Core.Insights;
 /// The Automated Action Engine. It learns from operator behaviour with a
 /// first-order Markov-style transition table:
 ///
-///     context  --(count)-->  follow-up command
+///     context  --(timestamped weight)-->  follow-up command
 ///
 /// A <b>context</b> is either an alert ("alert:Power:Anomalous") or a search
 /// ("search:pump a"). Whenever an operator issues a command shortly after a
-/// context was observed, the (context, follow-up) pair's counter is bumped.
-/// Suggestions are then ranked by confidence = count / total for that context
-/// (relative frequency), so the pattern "the operator usually switches the
-/// relay off after a power anomaly" surfaces before they search for it.
+/// context was observed, the (context, follow-up) pair's timestamped weight is
+/// bumped. Its effective weight decays by half every week, so recent behavior
+/// influences confidence and minimum support more than stale history.
+/// Suggestions are ranked by effective weight / total effective weight for
+/// that context, so recency-adjusted operator behavior surfaces first.
 ///
 /// Learned patterns need a minimum support (to avoid suggesting on one-offs),
 /// so a small rule table covers the cold-start case, and a per-device anomaly
@@ -23,17 +24,20 @@ namespace SmartX.Core.Insights;
 public sealed class ActionPatternEngine
 {
     private static readonly TimeSpan FollowWindow = TimeSpan.FromSeconds(90);
-    private const int MinSupport = 2;
+    private static readonly TimeSpan PatternHalfLife = TimeSpan.FromDays(7);
+    private const double MinSupport = 2;
     private const int MaxRecentContexts = 40;
 
     private readonly object _lock = new();
 
-    // context key -> (follow-up key -> count)
-    private readonly Dictionary<string, Dictionary<string, int>> _transitions = new(StringComparer.Ordinal);
+    // context key -> (follow-up key -> recency-decayed evidence)
+    private readonly Dictionary<string, Dictionary<string, TransitionEvidence>> _transitions = new(StringComparer.Ordinal);
     private readonly List<ContextEvent> _recent = [];
     private readonly Dictionary<string, int> _anomalyCountByDevice = new(StringComparer.Ordinal);
 
     private sealed record ContextEvent(string Key, string? DeviceId, DateTimeOffset At);
+    private sealed record TransitionEvidence(double Weight, DateTimeOffset UpdatedAt);
+    private sealed record WeightedFollowUp(string Key, double Weight);
 
     public static string AlertContext(SensorCategory category, AnomalySeverity severity) =>
         $"alert:{category}:{severity}";
@@ -95,11 +99,11 @@ public sealed class ActionPatternEngine
                         continue;
                     }
 
-                    Bump(context.Key, type.ToString(), 1);
+                    Bump(context.Key, type.ToString(), 1, at);
                 }
                 else
                 {
-                    Bump(context.Key, $"{deviceId}|{type}", 1);
+                    Bump(context.Key, $"{deviceId}|{type}", 1, at);
                 }
             }
         }
@@ -123,16 +127,17 @@ public sealed class ActionPatternEngine
     {
         lock (_lock)
         {
-            Bump(AlertContext(SensorCategory.Power, AnomalySeverity.Anomalous), CommandType.RelayOff.ToString(), 4);
-            Bump(AlertContext(SensorCategory.Power, AnomalySeverity.Disconnected), CommandType.RelayOn.ToString(), 3);
-            Bump(AlertContext(SensorCategory.Environmental, AnomalySeverity.Anomalous), CommandType.PumpOff.ToString(), 4);
-            Bump(AlertContext(SensorCategory.Actuator, AnomalySeverity.Anomalous), CommandType.ValveClose.ToString(), 3);
+            var now = DateTimeOffset.UtcNow;
+            Bump(AlertContext(SensorCategory.Power, AnomalySeverity.Anomalous), CommandType.RelayOff.ToString(), 4, now);
+            Bump(AlertContext(SensorCategory.Power, AnomalySeverity.Disconnected), CommandType.RelayOn.ToString(), 3, now);
+            Bump(AlertContext(SensorCategory.Environmental, AnomalySeverity.Anomalous), CommandType.PumpOff.ToString(), 4, now);
+            Bump(AlertContext(SensorCategory.Actuator, AnomalySeverity.Anomalous), CommandType.ValveClose.ToString(), 3, now);
 
             var actuator = devices.FirstOrDefault(d => d.Category == SensorCategory.Actuator);
             if (actuator is not null)
             {
-                Bump(SearchContext("pump"), $"{actuator.DeviceId}|{CommandType.PumpOn}", 3);
-                Bump(SearchContext("valve"), $"{actuator.DeviceId}|{CommandType.ValveOpen}", 2);
+                Bump(SearchContext("pump"), $"{actuator.DeviceId}|{CommandType.PumpOn}", 3, now);
+                Bump(SearchContext("valve"), $"{actuator.DeviceId}|{CommandType.ValveOpen}", 2, now);
             }
         }
     }
@@ -151,6 +156,7 @@ public sealed class ActionPatternEngine
 
         lock (_lock)
         {
+            var now = DateTimeOffset.UtcNow;
             // 1. Learned: what the operator usually does after this kind of alert.
             foreach (var device in problem)
             {
@@ -160,10 +166,11 @@ public sealed class ActionPatternEngine
                     continue;
                 }
 
-                var total = followUps.Values.Sum();
-                foreach (var (followUp, count) in followUps.OrderByDescending(f => f.Value).Take(2))
+                var weightedFollowUps = GetWeightedFollowUps(followUps, now);
+                var total = weightedFollowUps.Sum(f => f.Weight);
+                foreach (var followUp in weightedFollowUps.OrderByDescending(f => f.Weight).Take(2))
                 {
-                    if (count < MinSupport || !Enum.TryParse<CommandType>(followUp, out var command))
+                    if (followUp.Weight < MinSupport || !Enum.TryParse<CommandType>(followUp.Key, out var command))
                     {
                         continue;
                     }
@@ -172,10 +179,10 @@ public sealed class ActionPatternEngine
                     suggestions[id] = new SuggestedAction(
                         id,
                         $"{command.Label()} on {device.DeviceId}",
-                        $"{ReadingContext(device)} Operators chose {command.Label()} in {count} of {total} supported follow-ups after similar {device.Category} {device.Severity} alerts. This is a learned response, not proof of the cause; review the latest reading and device output before applying because the command changes the output immediately.",
+                        $"{ReadingContext(device)} Recency-weighted operator evidence for {command.Label()} is {FormatWeight(followUp.Weight)} of {FormatWeight(total)} effective observations after similar {device.Category} {device.Severity} alerts (evidence halves every 7 days). This is a learned response, not proof of the cause; review the latest reading and device output before applying because the command changes the output immediately.",
                         device.DeviceId,
                         command,
-                        Math.Round((double)count / total, 2),
+                        Math.Round(followUp.Weight / total, 2),
                         "learned");
                 }
             }
@@ -193,11 +200,12 @@ public sealed class ActionPatternEngine
                         continue;
                     }
 
-                    var total = followUps.Values.Sum();
-                    foreach (var (followUp, count) in followUps.OrderByDescending(f => f.Value).Take(2))
+                    var weightedFollowUps = GetWeightedFollowUps(followUps, now);
+                    var total = weightedFollowUps.Sum(f => f.Weight);
+                    foreach (var followUp in weightedFollowUps.OrderByDescending(f => f.Weight).Take(2))
                     {
-                        var parts = followUp.Split('|');
-                        if (count < MinSupport || parts.Length != 2 || !Enum.TryParse<CommandType>(parts[1], out var command))
+                        var parts = followUp.Key.Split('|');
+                        if (followUp.Weight < MinSupport || parts.Length != 2 || !Enum.TryParse<CommandType>(parts[1], out var command))
                         {
                             continue;
                         }
@@ -206,10 +214,10 @@ public sealed class ActionPatternEngine
                         suggestions[id] = new SuggestedAction(
                             id,
                             $"{command.Label()} on {parts[0]}",
-                            $"This command followed the search \"{context[7..]}\" in {count} of {total} supported operator workflows. It is a learned workflow preference, not a diagnosis; confirm {parts[0]}'s current state and intended outcome before applying because the command changes its output immediately.",
+                            $"This command followed the search \"{context[7..]}\" with {FormatWeight(followUp.Weight)} of {FormatWeight(total)} recency-weighted effective observations (evidence halves every 7 days). This is a learned workflow preference, not a diagnosis; confirm {parts[0]}'s current state and intended outcome before applying because the command changes its output immediately.",
                             parts[0],
                             command,
-                            Math.Round((double)count / total, 2),
+                            Math.Round(followUp.Weight / total, 2),
                             "learned");
                     }
                 }
@@ -317,14 +325,55 @@ public sealed class ActionPatternEngine
         }
     }
 
-    private void Bump(string context, string followUp, int by)
+    private void Bump(string context, string followUp, int by, DateTimeOffset at)
     {
         if (!_transitions.TryGetValue(context, out var followUps))
         {
-            followUps = new Dictionary<string, int>(StringComparer.Ordinal);
+            followUps = new Dictionary<string, TransitionEvidence>(StringComparer.Ordinal);
             _transitions[context] = followUps;
         }
 
-        followUps[followUp] = followUps.GetValueOrDefault(followUp) + by;
+        if (followUps.TryGetValue(followUp, out var existing))
+        {
+            if (at >= existing.UpdatedAt)
+            {
+                followUps[followUp] = new TransitionEvidence(
+                    DecayedWeight(existing, at) + by,
+                    at);
+            }
+            else
+            {
+                var lateEvidence = by * Math.Pow(
+                    0.5,
+                    (existing.UpdatedAt - at).TotalSeconds / PatternHalfLife.TotalSeconds);
+                followUps[followUp] = existing with { Weight = existing.Weight + lateEvidence };
+            }
+        }
+        else
+        {
+            followUps[followUp] = new TransitionEvidence(by, at);
+        }
     }
+
+    private static List<WeightedFollowUp> GetWeightedFollowUps(
+        Dictionary<string, TransitionEvidence> followUps,
+        DateTimeOffset at) =>
+        followUps
+            .Select(entry => new WeightedFollowUp(entry.Key, DecayedWeight(entry.Value, at)))
+            .Where(entry => entry.Weight > 0)
+            .ToList();
+
+    private static double DecayedWeight(TransitionEvidence evidence, DateTimeOffset at)
+    {
+        var age = at - evidence.UpdatedAt;
+        if (age <= TimeSpan.Zero)
+        {
+            return evidence.Weight;
+        }
+
+        return evidence.Weight * Math.Pow(0.5, age.TotalSeconds / PatternHalfLife.TotalSeconds);
+    }
+
+    private static string FormatWeight(double weight) =>
+        weight.ToString("0.0", System.Globalization.CultureInfo.InvariantCulture);
 }

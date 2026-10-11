@@ -39,7 +39,9 @@ public class ActionPatternEngineTests
         Assert.Equal(1.0, learned.Confidence);
         Assert.Contains("reading 500", learned.Detail);
         Assert.Contains("z-score +4.00", learned.Detail);
-        Assert.Contains("3 of 3 supported follow-ups", learned.Detail);
+        Assert.Contains("Recency-weighted operator evidence", learned.Detail);
+        Assert.Contains("effective observations", learned.Detail);
+        Assert.Contains("halves every 7 days", learned.Detail);
     }
 
     [Fact]
@@ -93,6 +95,33 @@ public class ActionPatternEngineTests
     }
 
     [Fact]
+    public void OldSearchPatternsDecayBelowMinimumSupport()
+    {
+        var engine = new ActionPatternEngine();
+        var old = DateTimeOffset.UtcNow.AddDays(-30);
+
+        RecordSearchFollowUp(engine, "pump", "ACT1", CommandType.PumpOn, 4, old);
+
+        Assert.Empty(engine.Suggest("pump", []));
+    }
+
+    [Fact]
+    public void RecentSearchPatternOutweighsOlderPattern()
+    {
+        var engine = new ActionPatternEngine();
+        var old = DateTimeOffset.UtcNow.AddDays(-30);
+        var recent = DateTimeOffset.UtcNow.AddMinutes(-5);
+
+        RecordSearchFollowUp(engine, "pump", "ACT1", CommandType.RelayOff, 8, old);
+        RecordSearchFollowUp(engine, "pump", "ACT1", CommandType.PumpOn, 3, recent);
+
+        var learned = Assert.Single(engine.Suggest("pump", []));
+        Assert.Equal(CommandType.PumpOn, learned.Command);
+        Assert.Equal("ACT1", learned.DeviceId);
+        Assert.InRange(learned.Confidence, 0.85, 0.9);
+    }
+
+    [Fact]
     public void RepeatOffender_AppearsOnWatchList()
     {
         var engine = new ActionPatternEngine();
@@ -106,5 +135,21 @@ public class ActionPatternEngineTests
         var suggestions = engine.Suggest(null, []);
 
         Assert.Contains(suggestions, s => s.Basis == "history" && s.DeviceId == "FLAKY");
+    }
+
+    private static void RecordSearchFollowUp(
+        ActionPatternEngine engine,
+        string term,
+        string deviceId,
+        CommandType command,
+        int repetitions,
+        DateTimeOffset start)
+    {
+        for (var i = 0; i < repetitions; i++)
+        {
+            var at = start.AddMinutes(i * 2);
+            engine.ObserveSearch(term, at);
+            engine.ObserveCommand(deviceId, command, at.AddSeconds(5));
+        }
     }
 }
