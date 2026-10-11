@@ -1,6 +1,8 @@
+using SmartX.Core.Commands;
 using SmartX.Core.Devices;
 using SmartX.Core.Storage;
 using SmartX.Core.Telemetry;
+using SmartX.Api.Services;
 using Xunit;
 
 namespace SmartX.Api.Tests;
@@ -14,6 +16,22 @@ public class PipelineStructuresTests
         NodeType = DeploymentNodeType.Device,
         Sensor = new SensorProfile { MacAddress = mac, Category = category, LocationDescription = "test" }
     };
+
+    [Fact]
+    public void SensorRegistry_SeedsInitialStatusesForDefaultDevices()
+    {
+        var registry = new SensorRegistry();
+
+        Assert.Equal(14, registry.DeviceNodes.Count);
+        Assert.Equal(registry.DeviceNodes.Count, registry.AllStatuses.Count);
+        Assert.All(registry.AllStatuses, status =>
+        {
+            Assert.Equal(AnomalySeverity.Healthy, status.Severity);
+            Assert.False(status.PumpOn);
+            Assert.False(status.RelayOn);
+            Assert.False(status.ValveOpen);
+        });
+    }
 
     [Fact]
     public void DeviceStateStore_ResolvesByMac_CaseInsensitive()
@@ -33,7 +51,8 @@ public class PipelineStructuresTests
         var store = new DeviceStateStore();
         store.Sync([Device("D1", "MAC1"), Device("D2", "MAC2")]);
         store.Touch("MAC1", 42, DateTimeOffset.UtcNow);
-        store.SetOutput("D1", true);
+        store.SetOutput("D1", CommandType.PumpOn);
+        store.SetOutput("D1", CommandType.RelayOn);
 
         store.Sync([Device("D1", "MAC1")]);
 
@@ -41,7 +60,26 @@ public class PipelineStructuresTests
         Assert.True(store.TryGetByMac("MAC1", out var state));
         Assert.Equal(42, state!.LastValue);
         Assert.True(state.OutputOn);
+        Assert.True(state.PumpOn);
+        Assert.True(state.RelayOn);
+        Assert.False(state.ValveOpen);
         Assert.False(store.TryGetByMac("MAC2", out _));
+    }
+
+    [Fact]
+    public void DeviceStateStore_TracksEachOutputIndependently()
+    {
+        var store = new DeviceStateStore();
+        store.Sync([Device("D1", "MAC1")]);
+
+        store.SetOutput("D1", CommandType.PumpOn);
+        store.SetOutput("D1", CommandType.RelayOn);
+        store.SetOutput("D1", CommandType.PumpOff);
+
+        Assert.True(store.TryGetByDeviceId("D1", out var state));
+        Assert.False(state!.PumpOn);
+        Assert.True(state.RelayOn);
+        Assert.False(state.ValveOpen);
     }
 
     [Fact]

@@ -15,4 +15,8 @@ public sealed record DeviceStatus
     public required AnomalySeverity Severity { get; init; }
     public required DateTimeOffset LastSeen { get; init; }
     public required int ThroughputLastMinute { get; init; }
+    public bool OutputOn { get; init; }
+    public bool PumpOn { get; init; }
+    public bool RelayOn { get; init; }
+    public bool ValveOpen { get; init; }
 }

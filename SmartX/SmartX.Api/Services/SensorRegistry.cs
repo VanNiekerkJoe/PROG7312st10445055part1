@@ -227,7 +227,7 @@ public sealed class SensorRegistry
     /// jagged-array batcher, updates its rolling baseline, and produces the
     /// DeviceStatus snapshot the constellation renders next. Overloaded below
     /// with a simulateDisconnect flag for the seeder's occasional disconnect
-    /// scenario — two distinct signatures under the same method name,
+    /// scenario ï¿½ two distinct signatures under the same method name,
     /// resolved by the compiler at the call site (method overloading).
     /// </summary>
     public DeviceStatus? RecordReading(string deviceId, float value) =>
@@ -301,6 +301,20 @@ public sealed class SensorRegistry
         {
             _deviceNodesById[node.Id] = node;
             _zoneNameByDeviceId[node.Id] = zoneName ?? "Unknown";
+            if (node.Sensor is not null)
+            {
+                _latestStatus.TryAdd(node.Id, new DeviceStatus
+                {
+                    DeviceId = node.Id,
+                    ZoneName = zoneName ?? "Unknown",
+                    Category = node.Sensor.Category,
+                    LastValue = 0,
+                    ZScore = 0,
+                    Severity = AnomalySeverity.Healthy,
+                    LastSeen = DateTimeOffset.UtcNow,
+                    ThroughputLastMinute = 0
+                });
+            }
         }
 
         foreach (var child in node.Children)

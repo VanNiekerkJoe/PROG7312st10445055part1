@@ -1,4 +1,5 @@
 using System.Diagnostics.CodeAnalysis;
+using SmartX.Core.Commands;
 using SmartX.Core.Devices;
 using SmartX.Core.Telemetry;
 
@@ -11,7 +12,10 @@ public sealed record DeviceState(
     SensorCategory Category,
     DateTimeOffset LastSeen,
     double LastValue,
-    bool OutputOn);
+    bool OutputOn,
+    bool PumpOn,
+    bool RelayOn,
+    bool ValveOpen);
 
 /// <summary>
 /// Dictionary&lt;TKey, TValue&gt; of every registered device, keyed by MAC
@@ -81,7 +85,7 @@ public sealed class DeviceStateStore
 
                 _macByDeviceId[node.Id] = node.Sensor.MacAddress;
                 _byMac[node.Sensor.MacAddress] = new DeviceState(
-                    node.Id, node.Sensor.MacAddress, node.Sensor.Category, DateTimeOffset.UtcNow, 0, false);
+                    node.Id, node.Sensor.MacAddress, node.Sensor.Category, DateTimeOffset.UtcNow, 0, false, false, false, false);
             }
 
             foreach (var staleId in _macByDeviceId.Keys.Where(id => !liveIds.Contains(id)).ToList())
@@ -104,13 +108,20 @@ public sealed class DeviceStateStore
         }
     }
 
-    public bool SetOutput(string deviceId, bool outputOn)
+    public bool SetOutput(string deviceId, CommandType command)
     {
         lock (_lock)
         {
             if (_macByDeviceId.TryGetValue(deviceId, out var mac) && _byMac.TryGetValue(mac, out var state))
             {
-                _byMac[mac] = state with { OutputOn = outputOn };
+                var outputOn = command.TurnsOutputOn();
+                _byMac[mac] = command switch
+                {
+                    CommandType.PumpOn or CommandType.PumpOff => state with { OutputOn = outputOn, PumpOn = outputOn },
+                    CommandType.RelayOn or CommandType.RelayOff => state with { OutputOn = outputOn, RelayOn = outputOn },
+                    CommandType.ValveOpen or CommandType.ValveClose => state with { OutputOn = outputOn, ValveOpen = outputOn },
+                    _ => state
+                };
                 return true;
             }
 

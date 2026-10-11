@@ -104,28 +104,22 @@ public sealed class LiveStateService : IDisposable
     public DeviceStatus? Find(string? deviceId) =>
         deviceId is not null && _statuses.TryGetValue(deviceId, out var status) ? status : null;
 
-    /// <summary>Current state for a command group, or null if no command in that group is known.</summary>
-    public bool? OutputStateFor(string deviceId, CommandType onCommand)
+    /// <summary>Current output state reported by the server, or null if the device is unknown.</summary>
+    public bool? OutputStateFor(string deviceId, CommandType command)
     {
-        foreach (var command in _commands)
+        if (!_statuses.TryGetValue(deviceId, out var status))
         {
-            if (command.DeviceId == deviceId && SameOutputGroup(command.Type, onCommand))
-            {
-                return command.Type.TurnsOutputOn();
-            }
+            return null;
         }
 
-        return null;
-    }
-
-    private static bool SameOutputGroup(CommandType command, CommandType onCommand) =>
-        onCommand switch
+        return command switch
         {
-            CommandType.PumpOn => command is CommandType.PumpOn or CommandType.PumpOff,
-            CommandType.RelayOn => command is CommandType.RelayOn or CommandType.RelayOff,
-            CommandType.ValveOpen => command is CommandType.ValveOpen or CommandType.ValveClose,
-            _ => false
+            CommandType.PumpOn or CommandType.PumpOff => status.PumpOn,
+            CommandType.RelayOn or CommandType.RelayOff => status.RelayOn,
+            CommandType.ValveOpen or CommandType.ValveClose => status.ValveOpen,
+            _ => null
         };
+    }
 
     /// <summary>Idempotent: safe to call from the layout and from any page; retries if the API wasn't up yet.</summary>
     public async Task StartAsync()
@@ -221,6 +215,7 @@ public sealed class LiveStateService : IDisposable
     private void OnCommandIssued(DeviceCommand command)
     {
         _commands.Insert(0, command);
+        UpdateOutputState(command);
         UndoDepth++;
         MarkDirty();
     }
@@ -228,8 +223,24 @@ public sealed class LiveStateService : IDisposable
     private void OnCommandUndone(DeviceCommand command)
     {
         _commands.Insert(0, command);
+        UpdateOutputState(command);
         UndoDepth = Math.Max(0, UndoDepth - 1);
         MarkDirty();
+    }
+
+    private void UpdateOutputState(DeviceCommand command)
+    {
+        if (_statuses.TryGetValue(command.DeviceId, out var status))
+        {
+            var outputOn = command.Type.TurnsOutputOn();
+            _statuses[command.DeviceId] = command.Type switch
+            {
+                CommandType.PumpOn or CommandType.PumpOff => status with { OutputOn = outputOn, PumpOn = outputOn },
+                CommandType.RelayOn or CommandType.RelayOff => status with { OutputOn = outputOn, RelayOn = outputOn },
+                CommandType.ValveOpen or CommandType.ValveClose => status with { OutputOn = outputOn, ValveOpen = outputOn },
+                _ => status
+            };
+        }
     }
 
     private void OnPriorityAlert(PriorityEvent alert)

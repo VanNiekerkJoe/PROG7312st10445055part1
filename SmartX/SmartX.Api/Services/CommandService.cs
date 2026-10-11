@@ -32,7 +32,7 @@ public sealed class CommandService(
         devices.Sync(registry.DeviceNodes);
 
         var command = history.Issue(deviceId, type, fromSuggestion ? "suggestion" : source);
-        devices.SetOutput(deviceId, type.TurnsOutputOn());
+        devices.SetOutput(deviceId, type);
         if (!fromSuggestion)
         {
             patterns.ObserveCommand(deviceId, type, command.IssuedAt);
@@ -50,7 +50,7 @@ public sealed class CommandService(
             return new CommandResult(false, "Nothing to undo.", null);
         }
 
-        devices.SetOutput(undo.DeviceId, undo.Type.TurnsOutputOn());
+        devices.SetOutput(undo.DeviceId, undo.Type);
 
         await commandHub.Clients.All.SendAsync("CommandUndone", undo);
         return new CommandResult(true, $"Reverted: {undo.Type.Label()} sent to {undo.DeviceId}.", undo);

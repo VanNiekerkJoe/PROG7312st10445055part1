@@ -85,7 +85,16 @@ public sealed class IngestProcessor(
 
                 foreach (var status in latest.Values)
                 {
-                    await telemetryHub.Clients.All.SendAsync("DeviceStatusUpdated", status, stoppingToken);
+                    var currentStatus = devices.TryGetByDeviceId(status.DeviceId, out var state)
+                        ? status with
+                        {
+                            OutputOn = state.OutputOn,
+                            PumpOn = state.PumpOn,
+                            RelayOn = state.RelayOn,
+                            ValveOpen = state.ValveOpen
+                        }
+                        : status;
+                    await telemetryHub.Clients.All.SendAsync("DeviceStatusUpdated", currentStatus, stoppingToken);
                 }
 
                 if (now - lastSweep >= SweepEvery)
@@ -131,6 +140,8 @@ public sealed class IngestProcessor(
         {
             return null; // device was removed while the packet was queued
         }
+
+        status = status with { OutputOn = state.OutputOn };
 
         if (!item.Disconnected)
         {
@@ -208,7 +219,16 @@ public sealed class IngestProcessor(
             history.Append(status.DeviceId, state.LastValue, status.Severity, now);
             patterns.ObserveAlert(status.DeviceId, status.Category, status.Severity, now);
 
-            await telemetryHub.Clients.All.SendAsync("DeviceStatusUpdated", status, ct);
+            var currentStatus = devices.TryGetByDeviceId(status.DeviceId, out var currentState)
+                ? status with
+                {
+                    OutputOn = currentState.OutputOn,
+                    PumpOn = currentState.PumpOn,
+                    RelayOn = currentState.RelayOn,
+                    ValveOpen = currentState.ValveOpen
+                }
+                : status;
+            await telemetryHub.Clients.All.SendAsync("DeviceStatusUpdated", currentStatus, ct);
             await commandHub.Clients.All.SendAsync(
                 "PriorityAlert",
                 new PriorityEvent(status.DeviceId, state.LastValue, status.Severity, "No packets received for 20 s", now),

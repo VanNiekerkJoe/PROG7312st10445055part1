@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.SignalR;
 using SmartX.Api.Hubs;
+using SmartX.Core.Storage;
 using SmartX.Core.Telemetry;
 
 namespace SmartX.Api.Services;
@@ -12,7 +13,11 @@ namespace SmartX.Api.Services;
 /// pushes the resulting DeviceStatus to every connected dashboard over
 /// TelemetryHub.
 /// </summary>
-public sealed class TelemetrySeeder(SensorRegistry registry, IHubContext<TelemetryHub> hub, ILogger<TelemetrySeeder> logger)
+public sealed class TelemetrySeeder(
+    SensorRegistry registry,
+    DeviceStateStore deviceStates,
+    IHubContext<TelemetryHub> hub,
+    ILogger<TelemetrySeeder> logger)
     : BackgroundService
 {
     private static readonly TimeSpan TickInterval = TimeSpan.FromSeconds(2);
@@ -147,7 +152,16 @@ public sealed class TelemetrySeeder(SensorRegistry registry, IHubContext<Telemet
                 var status = registry.RecordReading(device.Id, value, simulateDisconnect: isDisconnect);
                 if (status is not null)
                 {
-                    await hub.Clients.All.SendAsync("DeviceStatusUpdated", status, stoppingToken);
+                    var currentStatus = deviceStates.TryGetByDeviceId(device.Id, out var state)
+                        ? status with
+                        {
+                            OutputOn = state.OutputOn,
+                            PumpOn = state.PumpOn,
+                            RelayOn = state.RelayOn,
+                            ValveOpen = state.ValveOpen
+                        }
+                        : status;
+                    await hub.Clients.All.SendAsync("DeviceStatusUpdated", currentStatus, stoppingToken);
                 }
             }
 

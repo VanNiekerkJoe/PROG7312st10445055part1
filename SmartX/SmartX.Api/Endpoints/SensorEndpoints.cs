@@ -1,6 +1,7 @@
 using SmartX.Api.Services;
 using SmartX.Api.Hubs;
 using SmartX.Core.Devices;
+using SmartX.Core.Storage;
 using SmartX.Core.Telemetry;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.SignalR;
@@ -27,8 +28,22 @@ public static class SensorEndpoints
     {
         var group = app.MapGroup("/api/sensors").WithTags("Sensors");
 
-        group.MapGet("/", (SensorRegistry registry) =>
-            Results.Ok(registry.AllStatuses));
+        group.MapGet("/", (SensorRegistry registry, DeviceStateStore devices) =>
+        {
+            devices.Sync(registry.DeviceNodes);
+            var statuses = registry.AllStatuses
+                .Select(status => devices.TryGetByDeviceId(status.DeviceId, out var state)
+                    ? status with
+                    {
+                        OutputOn = state.OutputOn,
+                        PumpOn = state.PumpOn,
+                        RelayOn = state.RelayOn,
+                        ValveOpen = state.ValveOpen
+                    }
+                    : status)
+                .ToList();
+            return Results.Ok(statuses);
+        });
 
         group.MapGet("/tree", (SensorRegistry registry) =>
             Results.Ok(DeploymentNodeDto.From(registry.Root)));
@@ -39,7 +54,7 @@ public static class SensorEndpoints
             return Results.Ok(result);
         });
 
-        group.MapPost("/register", async (RegisterDeviceRequest request, SensorRegistry registry, IHubContext<TelemetryHub> hub) =>
+        group.MapPost("/register", async (RegisterDeviceRequest request, SensorRegistry registry, DeviceStateStore devices, IHubContext<TelemetryHub> hub) =>
         {
             var outcome = registry.RegisterDevice(request.ParentSubZoneId, request.MacAddress, request.Category, request.LocationDescription);
 
@@ -52,7 +67,17 @@ public static class SensorEndpoints
             // up the new node too, not just the one that registered it.
             if (outcome.Device is not null)
             {
-                await hub.Clients.All.SendAsync("DeviceStatusUpdated", outcome.Device);
+                devices.Sync(registry.DeviceNodes);
+                var status = devices.TryGetByDeviceId(outcome.Device.DeviceId, out var state)
+                    ? outcome.Device with
+                    {
+                        OutputOn = state.OutputOn,
+                        PumpOn = state.PumpOn,
+                        RelayOn = state.RelayOn,
+                        ValveOpen = state.ValveOpen
+                    }
+                    : outcome.Device;
+                await hub.Clients.All.SendAsync("DeviceStatusUpdated", status);
             }
 
             return Results.Ok(outcome);
@@ -166,7 +191,7 @@ public static class SensorEndpoints
                 ? type
                 : "application/octet-stream";
 
-            // enableRangeProcessing still works over an in-memory byte array —
+            // enableRangeProcessing still works over an in-memory byte array ï¿½
             // the browser can scrub/preview large files without a full re-download.
             return Results.File(decrypted, contentType, safeFileName, enableRangeProcessing: true);
         });
