@@ -60,7 +60,28 @@ public sealed class LiveStateService : IDisposable
     public string SearchTerm { get; set; } = "";
     public string CategoryFilter { get; set; } = "";
     public string SeverityFilter { get; set; } = "";
+    public string? HighlightZone { get; set; }
+    public HashSet<AnomalySeverity> HiddenSeverities { get; } = [];
     public string? SelectedDeviceId { get; set; }
+
+    public void ToggleHiddenSeverity(AnomalySeverity severity)
+    {
+        if (HiddenSeverities.Remove(severity))
+        {
+            return;
+        }
+
+        if (HiddenSeverities.Count < Enum.GetValues<AnomalySeverity>().Length - 1)
+        {
+            HiddenSeverities.Add(severity);
+        }
+    }
+
+    public void ResetConstellationFilters()
+    {
+        HighlightZone = null;
+        HiddenSeverities.Clear();
+    }
 
     // ----- live data -----
     public IReadOnlyCollection<DeviceStatus> Statuses => _statuses.Values;

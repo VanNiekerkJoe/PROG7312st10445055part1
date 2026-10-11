@@ -1,5 +1,6 @@
 @page "/ingestion"
 @using SmartX.Client.Components
+@inject LiveStateService Live
 @inject TelemetryApiClient Api
 @inject TelemetryHubClient Hub
 @implements IAsyncDisposable
@@ -40,23 +41,25 @@
                                 OnClose="() => _showRegistrationForm = false" 
                                 OnRegistered="OnDeviceRegistered" />
     }
-    @if (_highlightZone is not null)
+    @if (Live.HighlightZone is not null)
     {
         <div class="filter-chip">
-            Filtered: @_highlightZone
-            <span class="filter-clear" @onclick="() => _highlightZone = null">✕ clear</span>
+            Filtered: @Live.HighlightZone
+            <span class="filter-clear" @onclick="() => Live.HighlightZone = null">✕ clear</span>
         </div>
     }
     <div class="main-grid">
-        <ZoneList Zones="_zoneSummaries" OnZoneSelected="OnZoneClicked" ActiveZone="_highlightZone" />
+        <ZoneList Zones="_zoneSummaries" OnZoneSelected="OnZoneClicked" ActiveZone="Live.HighlightZone" />
         <div class="panel constellation-panel">
             <p class="panel-title">Anomaly constellation</p>
             <ConstellationView @ref="_constellationView" 
                                Devices="_devices" 
                                OnDeviceSelected="OnDeviceSelected"
-                               SelectedDeviceId="_selected?.DeviceId" 
-                               HighlightZone="_highlightZone"
-                               OnResetFilters="() => _highlightZone = null" />
+                               SelectedDeviceId="Live.SelectedDeviceId"
+                               HighlightZone="Live.HighlightZone"
+                               HiddenSeverities="Live.HiddenSeverities"
+                               OnSeverityToggled="Live.ToggleHiddenSeverity"
+                               OnResetFilters="Live.ResetConstellationFilters" />
         </div>
         <SensorDetailPanel Selected="_selected" ApiClient="Api" OnRemoveDevice="RemoveDevice" />
     </div>
@@ -75,7 +78,6 @@
     private List<DeviceStatus> _devices = [];
     private List<ZoneList.ZoneSummary> _zoneSummaries = [];
     private DeviceStatus? _selected;
-    private string? _highlightZone;
     private bool _showRegistrationForm;
     private int _activeSensors;
     private int _anomalyCount;
@@ -93,6 +95,7 @@
             _seederRunning = status?.IsRunning ?? true;
 
             await ReloadFromApi();
+            _selected = Live.Find(Live.SelectedDeviceId);
 
             Hub.StatusUpdated += OnStatusUpdated;
             Hub.DeviceRemoved += OnDeviceRemoved;
@@ -190,9 +193,14 @@
         }
     }
 
-    private void OnDeviceSelected(DeviceStatus device) => _selected = device;
+    private void OnDeviceSelected(DeviceStatus device)
+    {
+        _selected = device;
+        Live.SelectedDeviceId = device.DeviceId;
+    }
     
-    private void OnZoneClicked(string zoneName) => _highlightZone = _highlightZone == zoneName ? null : zoneName;
+    private void OnZoneClicked(string zoneName) =>
+        Live.HighlightZone = Live.HighlightZone == zoneName ? null : zoneName;
 
     private async Task OnDeviceRegistered(DeviceStatus newDevice)
     {

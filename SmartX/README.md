@@ -204,6 +204,12 @@ Open the client URL, then use the top navigation bar: **Sensor ingestion** (Part
 **Command stream** (Part 2). Docker: `docker compose up --build` starts the API, client and
 simulator (`SMARTX_API_URL=http://smartx-api:8080` is set for the simulator).
 
+Navigation between these modules preserves the command search/category/state filters, selected
+device, and ingestion zone/constellation severity filters in the app-lifetime `LiveStateService`.
+Both SignalR clients retry reconnects indefinitely with a delay capped at 30 seconds, then
+re-fetch server state after reconnect so missed device or command events do not require a page
+refresh.
+
 Simulator keys: **S** = spike a random sensor, **X** = silence a random device for 30 s, **Q** = quit.
 
 ## How to test the new data structures

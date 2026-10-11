@@ -22,7 +22,7 @@ public sealed class CommandHubClient : IAsyncDisposable
     {
         _connection = new HubConnectionBuilder()
             .WithUrl(hubUrl)
-            .WithAutomaticReconnect()
+            .WithAutomaticReconnect(new SignalRReconnectPolicy())
             .Build();
 
         _connection.On<DeviceCommand>("CommandIssued", command => CommandIssued?.Invoke(command));

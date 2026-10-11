@@ -128,8 +128,8 @@
         @foreach (var severity in SeverityOrder)
         {
             <button type="button"
-                    class="cx-pill cx-pill-@SeverityName(severity) @(_hiddenSeverities.Contains(severity) ? "cx-pill-off" : "")"
-                    aria-pressed="@(_hiddenSeverities.Contains(severity) ? "false" : "true")"
+                    class="cx-pill cx-pill-@SeverityName(severity) @(HiddenSeverities.Contains(severity) ? "cx-pill-off" : "")"
+                    aria-pressed="@(HiddenSeverities.Contains(severity) ? "false" : "true")"
                     @onclick="() => ToggleSeverity(severity)">
                 <i></i>@severity <b>@CountOf(severity)</b>
             </button>
@@ -143,6 +143,8 @@
     [Parameter] public EventCallback<DeviceStatus> OnDeviceSelected { get; set; }
     [Parameter] public string? SelectedDeviceId { get; set; }
     [Parameter] public string? HighlightZone { get; set; }
+    [Parameter, EditorRequired] public IReadOnlySet<AnomalySeverity> HiddenSeverities { get; set; } = new HashSet<AnomalySeverity>();
+    [Parameter] public EventCallback<AnomalySeverity> OnSeverityToggled { get; set; }
     [Parameter] public EventCallback OnResetFilters { get; set; }
     [Parameter] public bool ForceSpawnAll { get; set; }
 
@@ -156,7 +158,6 @@
 
     private static readonly double[] Rings = [100, 145, 190];
 
-    private readonly HashSet<AnomalySeverity> _hiddenSeverities = [];
     private readonly HashSet<string> _knownDeviceIds = [];
     private HashSet<string> _spawnIds = [];
 
@@ -296,35 +297,21 @@
     // ----- filtering -----
 
     private bool IsDimmed(DeviceStatus device) =>
-        _hiddenSeverities.Contains(device.Severity) ||
+        HiddenSeverities.Contains(device.Severity) ||
         (HighlightZone is not null && device.ZoneName != HighlightZone);
 
     private bool IsSeverityHidden(DeviceStatus device) =>
-        _hiddenSeverities.Contains(device.Severity);
+        HiddenSeverities.Contains(device.Severity);
 
     private bool IsZoneDim(string zoneName) =>
         HighlightZone is not null && zoneName != HighlightZone;
 
     // Guarded: refuses to hide the last remaining visible severity.
-    private void ToggleSeverity(AnomalySeverity severity)
-    {
-        if (_hiddenSeverities.Contains(severity))
-        {
-            _hiddenSeverities.Remove(severity);
-            return;
-        }
-
-        if (_hiddenSeverities.Count >= SeverityOrder.Length - 1)
-        {
-            return;
-        }
-
-        _hiddenSeverities.Add(severity);
-    }
+    private Task ToggleSeverity(AnomalySeverity severity) =>
+        OnSeverityToggled.InvokeAsync(severity);
 
     private async Task ResetFilters()
     {
-        _hiddenSeverities.Clear();
         await OnResetFilters.InvokeAsync();
     }
 

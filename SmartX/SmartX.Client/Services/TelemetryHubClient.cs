@@ -23,7 +23,7 @@ public sealed class TelemetryHubClient : IAsyncDisposable
     {
         _connection = new HubConnectionBuilder()
             .WithUrl(hubUrl)
-            .WithAutomaticReconnect()
+            .WithAutomaticReconnect(new SignalRReconnectPolicy())
             .Build();
 
         _connection.On<DeviceStatus>("DeviceStatusUpdated", status => StatusUpdated?.Invoke(status));
