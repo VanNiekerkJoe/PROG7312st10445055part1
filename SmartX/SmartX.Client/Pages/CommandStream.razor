@@ -435,7 +435,7 @@
 
         await RunBusyAsync(async () =>
         {
-            var result = await CommandApi.IssueCommandAsync(deviceId, command);
+            var result = await CommandApi.IssueCommandAsync(deviceId, command, fromSuggestion: true);
             Notify(result.Message, result.Ok);
         });
     }

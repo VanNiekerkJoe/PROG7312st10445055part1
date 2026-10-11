@@ -18,7 +18,7 @@ public static class CommandEndpoints
 
         commands.MapPost("/", async (IssueCommandRequest request, CommandService service) =>
         {
-            var result = await service.IssueAsync(request.DeviceId, request.Type, "operator");
+            var result = await service.IssueAsync(request.DeviceId, request.Type, "operator", request.FromSuggestion);
             return result.Ok ? Results.Ok(result) : Results.NotFound(result);
         });
 

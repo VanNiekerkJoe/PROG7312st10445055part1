@@ -32,11 +32,18 @@ public sealed class CommandApiClient
         }
     }
 
-    public async Task<CommandResult> IssueCommandAsync(string deviceId, CommandType type, CancellationToken ct = default)
+    public async Task<CommandResult> IssueCommandAsync(
+        string deviceId,
+        CommandType type,
+        bool fromSuggestion = false,
+        CancellationToken ct = default)
     {
         try
         {
-            var response = await _http.PostAsJsonAsync("/api/commands", new IssueCommandRequest(deviceId, type), ct);
+            var response = await _http.PostAsJsonAsync(
+                "/api/commands",
+                new IssueCommandRequest(deviceId, type, fromSuggestion),
+                ct);
             return await response.Content.ReadFromJsonAsync<CommandResult>(cancellationToken: ct)
                    ?? new CommandResult(false, "Empty response from the API.", null);
         }

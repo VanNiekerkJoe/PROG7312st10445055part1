@@ -18,7 +18,11 @@ public sealed class CommandService(
     ActionPatternEngine patterns,
     IHubContext<CommandHub> commandHub)
 {
-    public async Task<CommandResult> IssueAsync(string deviceId, CommandType type, string source)
+    public async Task<CommandResult> IssueAsync(
+        string deviceId,
+        CommandType type,
+        string source,
+        bool fromSuggestion = false)
     {
         if (!registry.DeviceNodes.Any(n => n.Id == deviceId))
         {
@@ -27,9 +31,12 @@ public sealed class CommandService(
 
         devices.Sync(registry.DeviceNodes);
 
-        var command = history.Issue(deviceId, type, source);
+        var command = history.Issue(deviceId, type, fromSuggestion ? "suggestion" : source);
         devices.SetOutput(deviceId, type.TurnsOutputOn());
-        patterns.ObserveCommand(deviceId, type, command.IssuedAt);
+        if (!fromSuggestion)
+        {
+            patterns.ObserveCommand(deviceId, type, command.IssuedAt);
+        }
 
         await commandHub.Clients.All.SendAsync("CommandIssued", command);
         return new CommandResult(true, $"{type.Label()} sent to {deviceId}.", command);

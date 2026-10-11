@@ -240,15 +240,28 @@ puts the packet in the priority lane.
 ## Predictive Action and Recommendation Engine
 
 `SmartX.Core/Insights/ActionPatternEngine.cs` learns from operator behaviour with a first-order
-transition table: `context -> follow-up command -> timestamped evidence weight`. A context is an alert
-(`alert:Power:Anomalous`) or a search (`search:pump a`). Every manual command issued within
-90 seconds of a context bumps that pair's evidence. Evidence decays exponentially with a
-7-day half-life, so old behavior gradually loses influence and can fall below the minimum
-effective support of 2. Suggestions are ranked by **confidence = recency-weighted evidence /
-total recency-weighted evidence** for the context. Three other sources feed the same panel:
+transition table: `context -> follow-up command -> (real weight, demo weight, timestamp)`. A
+context is an alert (`alert:Power:Anomalous`) or a search (`search:pump a`). A manual command
+within 90 seconds adds evidence to each matching context at most once, even if that context was
+observed repeatedly. Commands issued by applying a suggestion are excluded from learning so the
+engine does not reinforce its own recommendations.
+
+Evidence decays exponentially with a 7-day half-life. A learned pattern needs at least 1.5
+effective observations. Confidence uses additive smoothing:
+**weight / (total weight + 1)**, avoiding 100% confidence from thin evidence. Only the strongest
+follow-up and a competitive runner-up are shown. Stale evidence below 0.05 is pruned, contexts
+are capped at 200, and the weakest contexts are evicted first. Seeded demo evidence is separate
+from operator evidence, is not double-counted by repeated training, and is labelled in suggestion
+details.
+
+Search terms are normalized and match exactly or by prefix once at least three characters are
+typed. Suggestions only target currently registered devices; pattern history is pruned when
+devices are removed. The watch-list also decays, with a 6-hour half-life and a 2.5 effective-alert
+threshold. Timing, decay, support, and capacity are configurable through `ActionPatternOptions`;
+tests use `TimeProvider` to advance time deterministically. Three other sources feed the same panel:
 
 - **Rules** for cold start (e.g. anomalous Power -> Relay OFF) when nothing is learned yet;
-- **Watch-list** of devices that keep raising alerts (3+), shown as "Inspect ...";
+- **Watch-list** of devices that keep raising recent alerts, shown as "Inspect ...";
 - **Search patterns**: if the operator usually runs "Pump ON" after searching "pump", it is
   suggested while they search.
 

@@ -16,4 +16,4 @@ public sealed record CommandResult(bool Ok, string Message, DeviceCommand? Comma
 /// <summary>Full command log plus how many commands can still be undone.</summary>
 public sealed record CommandLogResponse(IReadOnlyList<DeviceCommand> Commands, int UndoDepth);
 
-public sealed record IssueCommandRequest(string DeviceId, CommandType Type);
+public sealed record IssueCommandRequest(string DeviceId, CommandType Type, bool FromSuggestion = false);

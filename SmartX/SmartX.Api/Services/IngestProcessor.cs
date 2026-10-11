@@ -64,6 +64,7 @@ public sealed class IngestProcessor(
                     var liveIds = devices.DeviceIds();
                     history.RetainOnly(liveIds);
                     alerts.RetainOnly(liveIds);
+                    patterns.RetainOnly(liveIds);
                     lastSync = now;
                 }
 
