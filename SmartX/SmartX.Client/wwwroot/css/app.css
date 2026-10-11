@@ -1565,10 +1565,10 @@ a.topnav-link:hover {
 .cx-node-anomalous { color: #ff4d5e; }
 .cx-node-disconnected { color: #9db0c2; }
 
-.cx-dot { stroke: #f4faff; stroke-width: 2; transition: stroke-width 0.15s ease, filter 0.15s ease; }
-.cx-node-healthy .cx-dot { fill: #2ee6a6; filter: drop-shadow(0 0 5px rgba(46, 230, 166, 0.85)); }
-.cx-node-elevated .cx-dot { fill: #ffc83d; filter: drop-shadow(0 0 6px rgba(255, 200, 61, 0.9)); }
-.cx-node-anomalous .cx-dot { fill: #ff4d5e; filter: drop-shadow(0 0 9px rgba(255, 77, 94, 1)); }
+.cx-dot { stroke: #eafff8; stroke-width: 2.5; transition: stroke-width 0.15s ease, filter 0.15s ease; }
+.cx-node-healthy .cx-dot { fill: #45ffc0; filter: drop-shadow(0 0 4px currentColor) drop-shadow(0 0 10px currentColor) drop-shadow(0 0 18px rgba(46, 230, 166, 0.85)) brightness(1.2); }
+.cx-node-elevated .cx-dot { fill: #ffda63; filter: drop-shadow(0 0 4px currentColor) drop-shadow(0 0 11px currentColor) drop-shadow(0 0 19px rgba(255, 200, 61, 0.9)) brightness(1.2); }
+.cx-node-anomalous .cx-dot { fill: #ff6677; filter: drop-shadow(0 0 5px currentColor) drop-shadow(0 0 13px currentColor) drop-shadow(0 0 22px rgba(255, 77, 94, 1)) brightness(1.2); }
 .cx-node-disconnected .cx-dot { fill: #0b1118; stroke: #9db0c2; stroke-dasharray: 3 3; }
 
 .cx-node:hover .cx-dot, .cx-node:focus-visible .cx-dot { stroke-width: 3.5; filter: drop-shadow(0 0 12px currentColor) brightness(1.15); }
@@ -1611,6 +1611,7 @@ a.topnav-link:hover {
 .cx-label-hover { opacity: 0; transition: opacity 0.15s ease; }
 .cx-node:hover .cx-label-hover, .cx-node:focus-visible .cx-label-hover { opacity: 1; }
 .cx-svg:not(.cx-dense) .cx-label-hover { opacity: 0.9; }
+.cx-outside-zone .cx-label-group, .cx-outside-zone .cx-value-group { opacity: 0.25; }
 
 .cx-value { font-size: 11px; font-weight: 600; }
 .cx-value-healthy { fill: #7ff5cf; }

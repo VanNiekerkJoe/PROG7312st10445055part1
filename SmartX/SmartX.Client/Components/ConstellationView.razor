@@ -65,7 +65,7 @@
             var radius = NodeRadius(device.Severity);
             var isSelected = device.DeviceId == SelectedDeviceId;
 
-            <g class="cx-node cx-node-@SeverityName(device.Severity) @(IsDimmed(device) ? "cx-dim" : "") @(isSelected ? "cx-selected" : "") @(_spawnIds.Contains(device.DeviceId) ? "cx-spawn" : "")"
+            <g class="cx-node cx-node-@SeverityName(device.Severity) @(IsSeverityHidden(device) ? "cx-dim" : "") @((HighlightZone is not null && device.ZoneName != HighlightZone) ? "cx-outside-zone" : "") @(isSelected ? "cx-selected" : "") @(_spawnIds.Contains(device.DeviceId) ? "cx-spawn" : "")"
                @key="device.DeviceId"
                tabindex="0"
                role="button"
@@ -298,6 +298,9 @@
     private bool IsDimmed(DeviceStatus device) =>
         _hiddenSeverities.Contains(device.Severity) ||
         (HighlightZone is not null && device.ZoneName != HighlightZone);
+
+    private bool IsSeverityHidden(DeviceStatus device) =>
+        _hiddenSeverities.Contains(device.Severity);
 
     private bool IsZoneDim(string zoneName) =>
         HighlightZone is not null && zoneName != HighlightZone;
