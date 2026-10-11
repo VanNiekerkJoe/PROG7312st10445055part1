@@ -1979,7 +1979,8 @@ a.topnav-link:hover {
 .cs-suggestion-rule { border-left-color: var(--amber); }
 .cs-suggestion-history { border-left-color: var(--red); }
 .cs-suggestion-head { display: flex; justify-content: space-between; align-items: center; gap: 0.6rem; font-size: 0.82rem; }
-.cs-suggestion-detail { margin: 0.35rem 0 0.6rem; font-size: 0.76rem; color: var(--muted); }
+.cs-suggestion-detail { margin: 0.45rem 0 0.35rem; font-size: 0.78rem; line-height: 1.55; color: var(--text); }
+.cs-suggestion-status { margin: 0 0 0.65rem; font-size: 0.68rem; color: var(--muted); }
 .cs-suggestion-foot { display: flex; align-items: center; gap: 0.7rem; }
 .cs-confidence { flex: 1; height: 7px; border-radius: 999px; background: #070b10; border: 1px solid var(--border); overflow: hidden; }
 .cs-confidence-bar { height: 100%; border-radius: 999px; background: linear-gradient(90deg, var(--accent-dim), var(--accent)); transition: width 0.4s ease; }

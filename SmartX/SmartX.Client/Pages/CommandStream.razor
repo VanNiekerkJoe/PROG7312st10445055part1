@@ -192,14 +192,16 @@
                         <p>No suggestions right now. They appear when a device misbehaves, or after you train the demo patterns.</p>
                     </div>
                 }
-                @foreach (var suggestion in _insights)
+                @foreach (var cached in _insights)
                 {
+                    var suggestion = cached.Suggestion;
                     <div class="cs-suggestion cs-suggestion-@suggestion.Basis">
                         <div class="cs-suggestion-head">
                             <strong>@suggestion.Title</strong>
                             <span class="cs-chip cs-basis-@suggestion.Basis">@suggestion.Basis</span>
                         </div>
                         <p class="cs-suggestion-detail">@suggestion.Detail</p>
+                        <p class="cs-suggestion-status">@SuggestionFreshness(cached.LastObservedAt)</p>
                         <div class="cs-suggestion-foot">
                             <div class="cs-confidence" title="Confidence"><div class="cs-confidence-bar" style="width:@Percent(suggestion.Confidence)"></div></div>
                             <span class="cs-confidence-label">@Percent(suggestion.Confidence)</span>
@@ -267,8 +269,13 @@
         ("Valve", CommandType.ValveOpen, CommandType.ValveClose)
     };
 
+    private static readonly TimeSpan SuggestionRetention = TimeSpan.FromMinutes(2);
+    private static readonly TimeSpan SuggestionFreshWindow = TimeSpan.FromSeconds(10);
+    private const int MaxVisibleSuggestions = 20;
+
     private List<HistoryPoint> _history = [];
-    private List<SuggestedAction> _insights = [];
+    private readonly Dictionary<string, CachedSuggestion> _cachedInsights = new(StringComparer.Ordinal);
+    private List<CachedSuggestion> _insights = [];
     private string? _message;
     private bool _messageOk = true;
     private DateTimeOffset _messageAt = DateTimeOffset.MinValue;
@@ -299,7 +306,41 @@
         }
 
         await Live.StartAsync();
-        _insights = await CommandApi.GetInsightsAsync(Live.SearchTerm);
+        var currentInsights = await CommandApi.GetInsightsAsync(Live.SearchTerm);
+        var now = DateTimeOffset.UtcNow;
+        var currentIds = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var suggestion in currentInsights)
+        {
+            currentIds.Add(suggestion.Id);
+            _cachedInsights[suggestion.Id] = new CachedSuggestion(suggestion, now);
+        }
+
+        foreach (var expiredId in _cachedInsights
+                     .Where(entry => now - entry.Value.LastObservedAt >= SuggestionRetention)
+                     .Select(entry => entry.Key)
+                     .ToList())
+        {
+            _cachedInsights.Remove(expiredId);
+        }
+
+        var retained = _cachedInsights.Values
+            .OrderByDescending(entry => currentIds.Contains(entry.Suggestion.Id))
+            .ThenByDescending(entry => entry.LastObservedAt)
+            .Take(MaxVisibleSuggestions)
+            .ToList();
+        var retainedIds = retained
+            .Select(entry => entry.Suggestion.Id)
+            .ToHashSet(StringComparer.Ordinal);
+        foreach (var unretainedId in _cachedInsights.Keys.Where(id => !retainedIds.Contains(id)).ToList())
+        {
+            _cachedInsights.Remove(unretainedId);
+        }
+
+        _insights = currentInsights
+            .Select(suggestion => _cachedInsights[suggestion.Id])
+            .Concat(retained.Where(entry => !currentIds.Contains(entry.Suggestion.Id)))
+            .Take(MaxVisibleSuggestions)
+            .ToList();
 
         var deviceId = Live.SelectedDeviceId;
         _history = deviceId is null ? [] : await CommandApi.GetHistoryAsync(deviceId, 60);
@@ -468,6 +509,28 @@
     }
 
     private void DismissMessage() => _message = null;
+
+    private static string SuggestionFreshness(DateTimeOffset lastObservedAt)
+    {
+        var age = DateTimeOffset.UtcNow - lastObservedAt;
+        if (age <= SuggestionFreshWindow)
+        {
+            return "Current recommendation";
+        }
+
+        var remaining = SuggestionRetention - age;
+        return $"Last detected {FormatDuration(age)} ago · kept for {FormatDuration(remaining)} more";
+    }
+
+    private static string FormatDuration(TimeSpan duration)
+    {
+        var totalSeconds = Math.Max(1, (int)Math.Ceiling(duration.TotalSeconds));
+        return totalSeconds >= 60
+            ? $"{totalSeconds / 60}m {totalSeconds % 60}s"
+            : $"{totalSeconds}s";
+    }
+
+    private sealed record CachedSuggestion(SuggestedAction Suggestion, DateTimeOffset LastObservedAt);
 
     private string OutputText(string deviceId) => Live.OutputStateFor(deviceId) switch
     {

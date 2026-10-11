@@ -172,7 +172,7 @@ public sealed class ActionPatternEngine
                     suggestions[id] = new SuggestedAction(
                         id,
                         $"{command.Label()} on {device.DeviceId}",
-                        $"After a {device.Category} {device.Severity} alert you usually ran this ({count} of {total} times).",
+                        $"{ReadingContext(device)} Operators chose {command.Label()} in {count} of {total} supported follow-ups after similar {device.Category} {device.Severity} alerts. This is a learned response, not proof of the cause; review the latest reading and device output before applying because the command changes the output immediately.",
                         device.DeviceId,
                         command,
                         Math.Round((double)count / total, 2),
@@ -206,7 +206,7 @@ public sealed class ActionPatternEngine
                         suggestions[id] = new SuggestedAction(
                             id,
                             $"{command.Label()} on {parts[0]}",
-                            $"You usually run this after searching \"{context[7..]}\" ({count} of {total} times).",
+                            $"This command followed the search \"{context[7..]}\" in {count} of {total} supported operator workflows. It is a learned workflow preference, not a diagnosis; confirm {parts[0]}'s current state and intended outcome before applying because the command changes its output immediately.",
                             parts[0],
                             command,
                             Math.Round((double)count / total, 2),
@@ -242,7 +242,7 @@ public sealed class ActionPatternEngine
                 suggestions[id] = new SuggestedAction(
                     id,
                     $"Inspect {deviceId}",
-                    $"Raised {count} alerts so far; likely faulty or badly placed.",
+                    $"This device has generated {count} alerts during the current API session. Review its recent telemetry for repeated spikes or dropouts, then check its power/network connection, sensor placement, and calibration. This is an inspection hint rather than a confirmed diagnosis; no command is applied automatically.",
                     deviceId,
                     null,
                     Math.Round(Math.Min(0.95, count / 10.0), 2),
@@ -261,7 +261,11 @@ public sealed class ActionPatternEngine
     {
         if (device.Severity == AnomalySeverity.Disconnected)
         {
-            return MakeRule(device, CommandType.RelayOn, "Node stopped reporting; re-energise its relay to try to bring it back.", 0.4);
+            return MakeRule(
+                device,
+                CommandType.RelayOn,
+                $"{ReadingContext(device)} No recent telemetry can indicate a power, network, gateway-range, or device fault. Relay ON may restore power, but can energise connected equipment; confirm it is safe to do so, then check the device supply and connection before applying.",
+                0.4);
         }
 
         if (device.Severity != AnomalySeverity.Anomalous)
@@ -271,11 +275,31 @@ public sealed class ActionPatternEngine
 
         return device.Category switch
         {
-            SensorCategory.Power => MakeRule(device, CommandType.RelayOff, "Power reading is far outside its baseline; shed the load.", 0.55),
-            SensorCategory.Environmental => MakeRule(device, CommandType.PumpOff, "Environmental reading is abnormal; pause irrigation until checked.", 0.5),
-            SensorCategory.Actuator => MakeRule(device, CommandType.ValveClose, "Actuator state is behaving unexpectedly; close the valve.", 0.5),
+            SensorCategory.Power => MakeRule(
+                device,
+                CommandType.RelayOff,
+                $"{ReadingContext(device)} The reading is well outside this sensor's rolling baseline. Relay OFF can shed the connected load; first confirm the affected equipment and whether interrupting it is safe, then inspect the load and wiring.",
+                0.55),
+            SensorCategory.Environmental => MakeRule(
+                device,
+                CommandType.PumpOff,
+                $"{ReadingContext(device)} The reading is well outside this sensor's rolling baseline. Pump OFF can pause irrigation or circulation; check nearby sensors and confirm pausing the pump will not harm the zone before applying, then inspect the sensor and local conditions.",
+                0.5),
+            SensorCategory.Actuator => MakeRule(
+                device,
+                CommandType.ValveClose,
+                $"{ReadingContext(device)} The actuator reading is well outside its rolling baseline. Valve CLOSE may isolate flow; verify the valve and downstream process are safe to close, then inspect the actuator and its recent command history.",
+                0.5),
             _ => null
         };
+    }
+
+    private static string ReadingContext(DeviceStatus device)
+    {
+        var zScore = device.ZScore.ToString("+0.00;-0.00;0.00", System.Globalization.CultureInfo.InvariantCulture);
+        var value = device.LastValue.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture);
+        var lastSeen = device.LastSeen.ToLocalTime().ToString("HH:mm:ss", System.Globalization.CultureInfo.InvariantCulture);
+        return $"Current status: {device.Severity} {device.Category} reading {value} (z-score {zScore}), last received at {lastSeen}.";
     }
 
     private static SuggestedAction MakeRule(DeviceStatus device, CommandType command, string detail, double confidence)

@@ -37,6 +37,9 @@ public class ActionPatternEngineTests
         Assert.Equal("P2", learned.DeviceId);
         Assert.Equal(CommandType.RelayOff, learned.Command);
         Assert.Equal(1.0, learned.Confidence);
+        Assert.Contains("reading 500", learned.Detail);
+        Assert.Contains("z-score +4.00", learned.Detail);
+        Assert.Contains("3 of 3 supported follow-ups", learned.Detail);
     }
 
     [Fact]
@@ -64,6 +67,10 @@ public class ActionPatternEngineTests
         var rule = Assert.Single(suggestions);
         Assert.Equal("rule", rule.Basis);
         Assert.Equal(CommandType.PumpOff, rule.Command);
+        Assert.Contains("Environmental reading 500", rule.Detail);
+        Assert.Contains("z-score +4.00", rule.Detail);
+        Assert.Contains("rolling baseline", rule.Detail);
+        Assert.Contains("confirm pausing the pump", rule.Detail);
     }
 
     [Fact]
