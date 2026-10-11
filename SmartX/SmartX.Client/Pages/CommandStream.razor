@@ -1,0 +1,508 @@
+@page "/commands"
+@using System.Globalization
+@using SmartX.Core.Commands
+@using SmartX.Core.Insights
+@using SmartX.Core.Storage
+@using SmartX.Client.Components
+@inject LiveStateService Live
+@inject CommandApiClient CommandApi
+@implements IDisposable
+
+@{
+    var filtered = FilteredDevices();
+    var selected = Selected;
+    var stats = Live.Stats;
+    var showPriorityBanner = Live.LastPriority is not null
+                             && DateTimeOffset.UtcNow - Live.LastPriorityReceivedAt < TimeSpan.FromSeconds(8);
+}
+
+<div class="dashboard cs-page">
+    <header class="cs-hero">
+        <div>
+            <p class="cs-eyebrow">Part 2 &middot; Real-time processing</p>
+            <h1 class="cs-title">Command stream</h1>
+            <p class="cs-sub">Live telemetry in, manual overrides out. Critical packets jump the queue.</p>
+        </div>
+        <div class="cs-actions">
+            <button class="btn btn-amber" @onclick="SendBurstAsync" disabled="@_busy">
+                <span class="btn-ico">&#8779;</span> Flood queue <small>2000 packets</small>
+            </button>
+            <button class="btn btn-red" @onclick="SimulateAlertAsync" disabled="@(_busy || selected is null)"
+                    title="@(selected is null ? "Select a device first" : "Send a forced critical packet for the selected device")">
+                <span class="btn-ico">&#9889;</span> Fire priority alert
+            </button>
+            <button class="btn btn-green" @onclick="TrainDemoAsync" disabled="@_busy">
+                <span class="btn-ico">&#10022;</span> Train demo patterns
+            </button>
+        </div>
+    </header>
+
+    @if (showPriorityBanner)
+    {
+        <div class="cs-priority-banner" role="alert">
+            <span class="cs-bolt">&#9889;</span>
+            <div>
+                <strong>Priority alert processed first</strong>
+                <p>@(Live.LastPriority?.DeviceId) &middot; @(Live.LastPriority?.Reason) &middot; jumped ahead of @Live.LastPriorityBacklog queued packets</p>
+            </div>
+        </div>
+    }
+
+    @if (!string.IsNullOrEmpty(_message))
+    {
+        <div class="cs-toast @(_messageOk ? "cs-toast-ok" : "cs-toast-err")" role="status">
+            <span>@_message</span>
+            <button type="button" class="cs-toast-x" aria-label="Dismiss" @onclick="DismissMessage">&#10005;</button>
+        </div>
+    }
+
+    <div class="metric-row">
+        <MetricCard Label="Standard queue" Icon="≣" Accent="blue"
+                    Value="@Num(stats?.StandardDepth ?? 0)" Hint="FIFO lane, oldest first" Series="Live.StandardSeries" />
+        <MetricCard Label="Priority lane" Icon="⚡" Accent="red"
+                    Value="@Num(stats?.PriorityDepth ?? 0)" Hint="@($"{Num(stats?.PriorityProcessed ?? 0)} handled so far")" Series="Live.PrioritySeries" />
+        <MetricCard Label="Throughput" Icon="⇅" Accent="green"
+                    Value="@(Live.ProcessedPerSecond.ToString("0", CultureInfo.InvariantCulture) + "/s")"
+                    Hint="@($"{Num(stats?.ProcessedTotal ?? 0)} packets processed")" Series="Live.RateSeries" />
+        <MetricCard Label="Active alerts" Icon="⚠" Accent="amber"
+                    Value="@Num(stats?.ActiveAlerts ?? 0)" Hint="open anomalies and disconnects" />
+        <MetricCard Label="Duplicates blocked" Icon="⊘" Accent="orange"
+                    Value="@Num(stats?.DuplicateAlertsSuppressed ?? 0)" Hint="HashSet refused repeat alerts" />
+    </div>
+
+    <div class="cs-grid">
+        <section class="panel cs-devices">
+            <p class="panel-title">Devices <span class="cs-count">@filtered.Count / @Live.Statuses.Count</span></p>
+
+            <div class="cs-search">
+                <span class="cs-search-ico">&#9906;</span>
+                <input class="cs-input" type="search" placeholder="Search id, zone, category or state"
+                       @bind="Live.SearchTerm" @bind:event="oninput" @onkeydown="OnSearchKeyDown" />
+            </div>
+            <div class="cs-filter-row">
+                <select class="cs-input" aria-label="Category filter" @bind="Live.CategoryFilter">
+                    <option value="">All categories</option>
+                    @foreach (var category in Enum.GetNames<SensorCategory>())
+                    {
+                        <option value="@category">@category</option>
+                    }
+                </select>
+                <select class="cs-input" aria-label="State filter" @bind="Live.SeverityFilter">
+                    <option value="">All states</option>
+                    @foreach (var severity in Enum.GetNames<AnomalySeverity>())
+                    {
+                        <option value="@severity">@severity</option>
+                    }
+                </select>
+            </div>
+            <button class="btn btn-ghost btn-block" @onclick="LogSearchAsync">Search and teach the engine</button>
+
+            <div class="cs-device-list">
+                @foreach (var device in filtered.Take(100))
+                {
+                    <button type="button"
+                            class="cs-device cs-device-@device.Severity.ToString().ToLowerInvariant() @(device.DeviceId == Live.SelectedDeviceId ? "cs-device-selected" : "")"
+                            @onclick="() => SelectAsync(device.DeviceId)">
+                        <span class="cs-dot cs-dot-@device.Severity.ToString().ToLowerInvariant()"></span>
+                        <span class="cs-device-id">@device.DeviceId</span>
+                        <span class="cs-device-value">@FormatValue(device.LastValue)</span>
+                        <span class="cs-device-meta">@device.Category &middot; @device.Severity</span>
+                    </button>
+                }
+                @if (filtered.Count == 0)
+                {
+                    <div class="cs-empty-state">
+                        <span class="cs-empty-ico">&#9678;</span>
+                        <p>@(Live.Statuses.Count == 0 ? "No devices yet. Start SmartX.DeviceSimulator." : "No devices match these filters.")</p>
+                    </div>
+                }
+            </div>
+        </section>
+
+        <div class="cs-center">
+            <section class="panel">
+                <p class="panel-title">Selected device</p>
+                @if (selected is null)
+                {
+                    <div class="cs-empty-state">
+                        <span class="cs-empty-ico">&#10022;</span>
+                        <p>Pick a device on the left to see its timeline and send override commands.</p>
+                    </div>
+                }
+                else
+                {
+                    <div class="cs-selected-head">
+                        <div>
+                            <h2 class="cs-selected-id">@selected.DeviceId</h2>
+                            <p class="cs-selected-sub">@selected.ZoneName &middot; @selected.Category</p>
+                        </div>
+                        <span class="cs-chip cs-chip-@selected.Severity.ToString().ToLowerInvariant()">@selected.Severity</span>
+                    </div>
+
+                    <div class="cs-readout-row">
+                        <div class="cs-readout">
+                            <span class="cs-readout-label">Last value</span>
+                            <span class="cs-readout-value">@FormatValue(selected.LastValue)</span>
+                        </div>
+                        <div class="cs-readout">
+                            <span class="cs-readout-label">Output</span>
+                            <span class="cs-readout-value cs-readout-small">@OutputText(selected.DeviceId)</span>
+                        </div>
+                        <div class="cs-readout">
+                            <span class="cs-readout-label">Last seen</span>
+                            <span class="cs-readout-value cs-readout-small">@selected.LastSeen.ToLocalTime().ToString("HH:mm:ss", CultureInfo.InvariantCulture)</span>
+                        </div>
+                    </div>
+
+                    <div class="cs-gauge-wrap">
+                        <div class="cs-gauge-head"><span>Deviation from baseline</span><span>z = @FormatValue(selected.ZScore)</span></div>
+                        <div class="cs-gauge">
+                            <div class="cs-gauge-band"></div>
+                            <div class="cs-gauge-needle" style="left:@GaugePercent(selected.ZScore)"></div>
+                        </div>
+                        <div class="cs-gauge-scale"><span>-4</span><span>0</span><span>+4</span></div>
+                    </div>
+
+                    <Sparkline Points="_history" />
+
+                    <p class="panel-title cs-subtitle">Manual override</p>
+                    <div class="cs-cmd-list">
+                        @foreach (var cmdGroup in CommandGroups)
+                        {
+                            <div class="cs-cmd-group">
+                                <span class="cs-cmd-name">@cmdGroup.Name</span>
+                                <button class="cs-cmd-btn cs-cmd-on" disabled="@_busy" @onclick="() => SendAsync(cmdGroup.On)">
+                                    <span>&#9654;</span> @ShortLabel(cmdGroup.On)
+                                </button>
+                                <button class="cs-cmd-btn cs-cmd-off" disabled="@_busy" @onclick="() => SendAsync(cmdGroup.Off)">
+                                    <span>&#9632;</span> @ShortLabel(cmdGroup.Off)
+                                </button>
+                            </div>
+                        }
+                    </div>
+                }
+            </section>
+
+            <section class="panel">
+                <p class="panel-title">Suggested actions <span class="cs-count">automated insights</span></p>
+                @if (_insights.Count == 0)
+                {
+                    <div class="cs-empty-state">
+                        <span class="cs-empty-ico">&#10024;</span>
+                        <p>No suggestions right now. They appear when a device misbehaves, or after you train the demo patterns.</p>
+                    </div>
+                }
+                @foreach (var suggestion in _insights)
+                {
+                    <div class="cs-suggestion cs-suggestion-@suggestion.Basis">
+                        <div class="cs-suggestion-head">
+                            <strong>@suggestion.Title</strong>
+                            <span class="cs-chip cs-basis-@suggestion.Basis">@suggestion.Basis</span>
+                        </div>
+                        <p class="cs-suggestion-detail">@suggestion.Detail</p>
+                        <div class="cs-suggestion-foot">
+                            <div class="cs-confidence" title="Confidence"><div class="cs-confidence-bar" style="width:@Percent(suggestion.Confidence)"></div></div>
+                            <span class="cs-confidence-label">@Percent(suggestion.Confidence)</span>
+                            @if (suggestion.Command is not null && suggestion.DeviceId is not null)
+                            {
+                                <button class="btn btn-primary btn-sm" disabled="@_busy" @onclick="() => ApplyAsync(suggestion)">Apply</button>
+                            }
+                        </div>
+                    </div>
+                }
+            </section>
+        </div>
+
+        <div class="cs-right">
+            <section class="panel">
+                <p class="panel-title">Command history <span class="cs-count">@Live.UndoDepth undoable</span></p>
+                <button class="btn btn-orange btn-block" @onclick="UndoAsync" disabled="@(_busy || Live.UndoDepth == 0)">
+                    <span class="btn-ico">&#8630;</span> Undo last command
+                </button>
+                <div class="cs-history">
+                    @foreach (var command in Live.Commands.Take(25))
+                    {
+                        <div class="cs-history-row @(command.IsUndo ? "cs-history-undo" : "")">
+                            <span class="cs-time">@command.IssuedAt.ToLocalTime().ToString("HH:mm:ss", CultureInfo.InvariantCulture)</span>
+                            <span class="cs-history-device">@command.DeviceId</span>
+                            <span class="cs-history-type">@command.Type.Label()</span>
+                            @if (command.IsUndo)
+                            {
+                                <span class="cs-chip">undo</span>
+                            }
+                        </div>
+                    }
+                    @if (Live.Commands.Count == 0)
+                    {
+                        <div class="cs-empty-state cs-empty-compact"><p>No commands sent yet.</p></div>
+                    }
+                </div>
+            </section>
+
+            <section class="panel">
+                <p class="panel-title">Live stream <span class="cs-live-dot @(Live.IsConnected ? "on" : "off")"></span></p>
+                <div class="cs-feed">
+                    @foreach (var item in Live.Feed.Take(30))
+                    {
+                        <div class="cs-feed-row @(item.IsPriority ? "cs-feed-priority" : "")">
+                            <span class="cs-dot cs-dot-@SeverityClass(item.Severity)"></span>
+                            <span class="cs-feed-text">@item.Text</span>
+                        </div>
+                    }
+                    @if (Live.Feed.Count == 0)
+                    {
+                        <div class="cs-empty-state cs-empty-compact"><p>Waiting for telemetry...</p></div>
+                    }
+                </div>
+            </section>
+        </div>
+    </div>
+</div>
+
+@code {
+    private static readonly (string Name, CommandType On, CommandType Off)[] CommandGroups =
+    {
+        ("Pump", CommandType.PumpOn, CommandType.PumpOff),
+        ("Relay", CommandType.RelayOn, CommandType.RelayOff),
+        ("Valve", CommandType.ValveOpen, CommandType.ValveClose)
+    };
+
+    private List<HistoryPoint> _history = [];
+    private List<SuggestedAction> _insights = [];
+    private string? _message;
+    private bool _messageOk = true;
+    private DateTimeOffset _messageAt = DateTimeOffset.MinValue;
+    private bool _busy;
+    private bool _disposed;
+    private Timer? _timer;
+
+    private DeviceStatus? Selected => Live.Find(Live.SelectedDeviceId);
+
+    protected override void OnInitialized()
+    {
+        // Non-blocking: the page renders immediately even if the API is slow or down;
+        // the timer keeps retrying and refreshing.
+        Live.Changed += OnLiveChanged;
+        _timer = new Timer(_ => { _ = InvokeAsync(RefreshAsync); }, null, TimeSpan.FromMilliseconds(300), TimeSpan.FromSeconds(3));
+    }
+
+    private void OnLiveChanged()
+    {
+        _ = InvokeAsync(StateHasChanged);
+    }
+
+    private async Task RefreshAsync()
+    {
+        if (_disposed)
+        {
+            return;
+        }
+
+        await Live.StartAsync();
+        _insights = await CommandApi.GetInsightsAsync(Live.SearchTerm);
+
+        var deviceId = Live.SelectedDeviceId;
+        _history = deviceId is null ? [] : await CommandApi.GetHistoryAsync(deviceId, 60);
+
+        if (_message is not null && DateTimeOffset.UtcNow - _messageAt > TimeSpan.FromSeconds(7))
+        {
+            _message = null;
+        }
+
+        if (!_disposed)
+        {
+            StateHasChanged();
+        }
+    }
+
+    private List<DeviceStatus> FilteredDevices()
+    {
+        var term = Live.SearchTerm?.Trim() ?? "";
+
+        return Live.Statuses
+            .Where(s => string.IsNullOrEmpty(Live.CategoryFilter) || s.Category.ToString() == Live.CategoryFilter)
+            .Where(s => string.IsNullOrEmpty(Live.SeverityFilter) || s.Severity.ToString() == Live.SeverityFilter)
+            .Where(s => term.Length == 0
+                        || s.DeviceId.Contains(term, StringComparison.OrdinalIgnoreCase)
+                        || s.ZoneName.Contains(term, StringComparison.OrdinalIgnoreCase)
+                        || s.Category.ToString().Contains(term, StringComparison.OrdinalIgnoreCase)
+                        || s.Severity.ToString().Contains(term, StringComparison.OrdinalIgnoreCase))
+            .OrderByDescending(s => SeverityRank(s.Severity))
+            .ThenBy(s => s.DeviceId, StringComparer.Ordinal)
+            .ToList();
+    }
+
+    private static int SeverityRank(AnomalySeverity severity) => severity switch
+    {
+        AnomalySeverity.Anomalous => 3,
+        AnomalySeverity.Disconnected => 2,
+        AnomalySeverity.Elevated => 1,
+        _ => 0
+    };
+
+    private async Task OnSearchKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter")
+        {
+            await LogSearchAsync();
+        }
+    }
+
+    // Teaches the pattern engine "operator searched X", so a follow-up command can be learned.
+    private async Task LogSearchAsync()
+    {
+        if (string.IsNullOrWhiteSpace(Live.SearchTerm))
+        {
+            return;
+        }
+
+        await CommandApi.LogSearchAsync(Live.SearchTerm);
+        await RefreshAsync();
+    }
+
+    private async Task SelectAsync(string deviceId)
+    {
+        Live.SelectedDeviceId = deviceId;
+        _history = [];
+        await RefreshAsync();
+    }
+
+    private async Task SendAsync(CommandType type)
+    {
+        var device = Selected;
+        if (device is null)
+        {
+            return;
+        }
+
+        await RunBusyAsync(async () =>
+        {
+            var result = await CommandApi.IssueCommandAsync(device.DeviceId, type);
+            Notify(result.Message, result.Ok);
+        });
+    }
+
+    private async Task ApplyAsync(SuggestedAction suggestion)
+    {
+        if (suggestion.DeviceId is null || suggestion.Command is null)
+        {
+            return;
+        }
+
+        var deviceId = suggestion.DeviceId;
+        var command = suggestion.Command.Value;
+
+        await RunBusyAsync(async () =>
+        {
+            var result = await CommandApi.IssueCommandAsync(deviceId, command);
+            Notify(result.Message, result.Ok);
+        });
+    }
+
+    private async Task UndoAsync()
+    {
+        await RunBusyAsync(async () =>
+        {
+            var result = await CommandApi.UndoLastCommandAsync();
+            Notify(result.Message, result.Ok);
+        });
+    }
+
+    private async Task SendBurstAsync()
+    {
+        await RunBusyAsync(async () =>
+        {
+            var ok = await CommandApi.BurstAsync(2000);
+            Notify(ok
+                ? "2000 packets queued. Watch the FIFO queue drain, then fire a priority alert to see it jump the line."
+                : "Could not queue the burst (are any sensors registered?).", ok);
+        });
+    }
+
+    private async Task SimulateAlertAsync()
+    {
+        var device = Selected;
+        if (device is null)
+        {
+            return;
+        }
+
+        await RunBusyAsync(async () =>
+        {
+            var response = await CommandApi.SimulateAlertAsync(device.DeviceId);
+            Notify(response is null
+                ? "Could not reach the API."
+                : $"Priority alert sent for {device.DeviceId}: it is processed ahead of the standard queue.", response is not null);
+        });
+    }
+
+    private async Task TrainDemoAsync()
+    {
+        await RunBusyAsync(async () =>
+        {
+            await CommandApi.TrainDemoPatternsAsync();
+            Notify("Demo operator history loaded. Learned suggestions now appear when matching alerts fire.", true);
+        });
+    }
+
+    private async Task RunBusyAsync(Func<Task> work)
+    {
+        _busy = true;
+        try
+        {
+            await work();
+        }
+        finally
+        {
+            _busy = false;
+        }
+
+        await RefreshAsync();
+    }
+
+    private void Notify(string message, bool ok)
+    {
+        _message = message;
+        _messageOk = ok;
+        _messageAt = DateTimeOffset.UtcNow;
+    }
+
+    private void DismissMessage() => _message = null;
+
+    private string OutputText(string deviceId) => Live.OutputStateFor(deviceId) switch
+    {
+        true => "ON / OPEN",
+        false => "OFF / CLOSED",
+        _ => "no command"
+    };
+
+    private static string ShortLabel(CommandType type) => type switch
+    {
+        CommandType.ValveOpen => "OPEN",
+        CommandType.ValveClose => "CLOSE",
+        _ => type.TurnsOutputOn() ? "ON" : "OFF"
+    };
+
+    private static string Num(long value) => value.ToString("N0", CultureInfo.InvariantCulture);
+
+    private static string FormatValue(double value) => value.ToString("0.##", CultureInfo.InvariantCulture);
+
+    private static string Percent(double confidence) =>
+        ((int)Math.Round(confidence * 100)).ToString(CultureInfo.InvariantCulture) + "%";
+
+    private static string GaugePercent(double z)
+    {
+        var clamped = Math.Clamp(z, -4, 4);
+        return ((clamped + 4) / 8 * 100).ToString("0.#", CultureInfo.InvariantCulture) + "%";
+    }
+
+    private static string SeverityClass(AnomalySeverity? severity) =>
+        (severity ?? AnomalySeverity.Healthy).ToString().ToLowerInvariant();
+
+    public void Dispose()
+    {
+        _disposed = true;
+        Live.Changed -= OnLiveChanged;
+        _timer?.Dispose();
+    }
+}

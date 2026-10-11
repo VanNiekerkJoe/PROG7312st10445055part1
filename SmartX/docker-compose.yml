@@ -14,3 +14,12 @@ services:
       - "8081:80"
     depends_on:
       - smartx-api
+
+  smartx-simulator:
+    build:
+      context: .
+      dockerfile: SmartX.DeviceSimulator/Dockerfile
+    environment:
+      - SMARTX_API_URL=http://smartx-api:8080
+    depends_on:
+      - smartx-api

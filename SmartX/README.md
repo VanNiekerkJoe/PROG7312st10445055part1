@@ -162,10 +162,10 @@ constant, flagged here rather than silently left broken.
   against real-time visual feedback and alert-fatigue literature; the same radial node/edge
   layout is designed to be extended into the mesh topology view required later in the PoE.
 
-## What's intentionally out of scope for Part 1
+## What's intentionally out of scope
 
-The **Command Stream** and **Mesh Topology** pillars are visible on the landing page but
-disabled, per the brief. Only the Sensor Ingestion pillar is implemented here.
+**Mesh Topology** stays disabled until the final PoE. Part 1 shipped Sensor Ingestion; Part 2
+(below) adds the Real-Time Command Stream.
 
 ## A note on how this was built
 
@@ -173,3 +173,113 @@ This solution was scaffolded with AI assistance and has **not been compiled or r
 environment it was written in (no .NET SDK / NuGet access there). Build it locally first and
 treat any compiler errors as expected first-pass issues to fix together, not a sign something
 is fundamentally wrong with the architecture; paste the error text back and we'll resolve it.
+
+---
+
+# Part 2: Real-Time Processing and Device Management
+
+Part 2 turns the static ingestion gateway into a real-time processing engine. Devices now
+**hit the API like real hardware** (`POST /api/telemetry/ingest`), packets flow through a
+two-lane queue, and operators get a **Real-Time Command Stream** page with manual overrides,
+undo, search/filter and automated "Suggested Actions".
+
+## Running Part 2 (three terminals)
+
+```
+# Terminal 1: API
+cd SmartX.Api
+dotnet run
+
+# Terminal 2: Client
+cd SmartX.Client
+dotnet run
+
+# Terminal 3: simulated devices (acts like a fleet of ESP32 nodes)
+cd SmartX.DeviceSimulator
+dotnet run                      # defaults to https://localhost:5001
+# dotnet run -- http://localhost:5000   # or pass the API URL
+```
+
+Open the client URL, then use the top navigation bar: **Sensor ingestion** (Part 1) and
+**Command stream** (Part 2). Docker: `docker compose up --build` starts the API, client and
+simulator (`SMARTX_API_URL=http://smartx-api:8080` is set for the simulator).
+
+Simulator keys: **S** = spike a random sensor, **X** = silence a random device for 30 s, **Q** = quit.
+
+## How to test the new data structures
+
+| Requirement | Where | How to see it working |
+|---|---|---|
+| `Queue<T>` (FIFO) | `SmartX.Core/Ingestion/TelemetryIngestQueue.cs` | On **Command stream** click **Flood queue (2000 packets)**. The *Standard queue* tile climbs, then drains in arrival order (about 500 packets/s). |
+| `PriorityQueue` (critical alerts) | same file | While the queue is draining, select a device and click **Fire priority alert on selected**. The alert appears at the top of the Live stream (red row) immediately and the *Priority lane* tile ticks up, even though thousands of packets are still queued. |
+| `Stack<T>` (undo) | `SmartX.Core/Commands/CommandHistory.cs` | Select a device, send **Pump ON**, then **Relay OFF**. Click **Undo last command**: Relay ON is issued first (LIFO), then Pump OFF. |
+| `Dictionary<TKey,TValue>` | `SmartX.Core/Storage/DeviceStateStore.cs` | Every ingested packet resolves its device by **MAC address** with one hash lookup (O(1)); a second dictionary maps device ID to MAC for commands. |
+| `SortedDictionary` | `SmartX.Core/Storage/SortedHistoryLog.cs` | Select a device: the timeline graph is read straight from the timestamp-sorted structure (`GET /api/telemetry/history/{deviceId}`). Red/amber dots mark non-healthy readings. |
+| `HashSet<T>` | `SmartX.Core/Storage/ActiveAlertSet.cs` | Press **X** in the simulator. After ~20 s the silent device raises **one** Disconnected alert; the *Duplicate alerts blocked* tile then climbs every sweep instead of re-alerting. |
+
+### How to simulate a high-priority alert
+
+1. Start the API, client and simulator, and open **Command stream**.
+2. Click **Flood queue (2000 packets)** to build a backlog in the standard lane.
+3. Select any sensor (Environmental or Power) on the left.
+4. Click **Fire priority alert on selected**. A forced critical packet (3x the device's value)
+   is posted to `/api/telemetry/simulate-alert`, enters the **priority lane** and is processed
+   before the backlog. Alternatively press **S** in the simulator window, or POST a reading
+   that is far outside the sensor's range to `/api/telemetry/ingest`.
+
+Packets are classified **at ingest time** (`TelemetryClassifier`): a z-score of 3 or more
+against the device's rolling baseline, an out-of-range value, or a device-reported disconnect
+puts the packet in the priority lane.
+
+## Predictive Action and Recommendation Engine
+
+`SmartX.Core/Insights/ActionPatternEngine.cs` learns from operator behaviour with a first-order
+transition table: `context -> follow-up command -> count`. A context is an alert
+(`alert:Power:Anomalous`) or a search (`search:pump a`). Every manual command issued within
+90 seconds of a context bumps that pair's counter. Suggestions are ranked by
+**confidence = count / total** for the context, with a minimum support of 2 so one-offs are
+ignored. Three other sources feed the same panel:
+
+- **Rules** for cold start (e.g. anomalous Power -> Relay OFF) when nothing is learned yet;
+- **Watch-list** of devices that keep raising alerts (3+), shown as "Inspect ...";
+- **Search patterns**: if the operator usually runs "Pump ON" after searching "pump", it is
+  suggested while they search.
+
+Suggestions appear in the **Suggested actions / automated insights** panel with a confidence bar
+and an **Apply** button. Click **Train demo patterns** to preload a believable operator history,
+then trigger an alert (or search "pump" and press Enter) to see learned suggestions.
+
+## Navigation and state
+
+`NavMenu` (top bar) is part of `MainLayout`, so it is on every page. `LiveStateService` is an
+app-lifetime singleton that owns the SignalR subscriptions, device statuses, command history,
+live feed and the operator's search/filter selections. Navigating between pages therefore never
+loses state, never opens a second hub connection, and UI updates are coalesced to 4 per second
+so a packet burst cannot freeze the browser.
+
+## New API surface
+
+| Method | Route | Purpose |
+|---|---|---|
+| POST | `/api/telemetry/ingest` | Device front door: `{ macAddress, value, disconnected? }` |
+| POST | `/api/telemetry/simulate-alert` | Demo: forced critical packet for `{ deviceId }` |
+| POST | `/api/telemetry/burst?count=2000` | Demo: flood the standard lane |
+| GET | `/api/telemetry/stats` | Queue depths, processed counts, alert counts |
+| GET | `/api/telemetry/history/{deviceId}?count=60` | Timeline points (sorted) |
+| GET / POST | `/api/commands` | Command log + undo depth / issue `{ deviceId, type }` |
+| POST | `/api/commands/undo` | Pop the stack and send the inverse command |
+| GET | `/api/insights?search=` | Suggested actions |
+| POST | `/api/insights/search`, `/train-demo` | Log a search / preload demo patterns |
+
+SignalR: `CommandHub` at `/hubs/commands` pushes `CommandIssued`, `CommandUndone`,
+`PriorityAlert` and `PipelineStats`; `TelemetryHub` still pushes `DeviceStatusUpdated`.
+
+## Part 2 tests
+
+```
+dotnet test SmartX.Api.Tests
+```
+
+New tests cover FIFO order, priority bypass and tie-breaking, back-pressure, undo order,
+MAC lookup and sync, duplicate-alert suppression, sorted history ordering/capacity, and the
+learned / rule / watch-list suggestion paths.

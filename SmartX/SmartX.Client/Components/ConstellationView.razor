@@ -1,121 +1,141 @@
 @using System.Globalization
 
-@if (Devices.Count == 0)
-{
-    <svg viewBox="0 0 360 220" class="constellation-svg">
-        <circle cx="180" cy="110" r="35" class="radar-ring" />
-        <circle cx="180" cy="110" r="65" class="radar-ring" />
-        <circle cx="180" cy="110" r="95" class="radar-ring" />
-        <line x1="80" y1="110" x2="280" y2="110" class="radar-crosshair" />
-        <line x1="180" y1="10" x2="180" y2="210" class="radar-crosshair" />
-        @for (var i = 0; i < 12; i++)
-        {
-            var deg = i * 30.0;
-            var rad = deg * Math.PI / 180.0;
-            var tx1 = 180 + 90 * Math.Cos(rad);
-            var ty1 = 110 + 90 * Math.Sin(rad);
-            var tx2 = 180 + 98 * Math.Cos(rad);
-            var ty2 = 110 + 98 * Math.Sin(rad);
-            <line x1="@(F(tx1))" y1="@(F(ty1))" x2="@(F(tx2))" y2="@(F(ty2))" class="radar-tick" />
-        }
-        <g class="radar-sweep-group">
-            <path d="M180,110 L280,110 A100,100 0 0 1 244.3,186.6 Z" class="radar-sweep-fill" />
-            <line x1="180" y1="110" x2="280" y2="110" class="radar-sweep-edge" />
-        </g>
-        <text x="180" y="140" class="constellation-empty-text">AWAITING SIGNAL</text>
-        <text x="8" y="208" class="hud-readout">CONTACTS 0</text>
-        <circle cx="180" cy="110" r="16" class="hub" />
-        <text x="180" y="113" class="hub-label">GW</text>
-    </svg>
+@{
+    var layout = BuildLayout();
+    var total = Devices.Count;
 }
-else
-{
-    <svg viewBox="0 0 360 220" class="constellation-svg">
-        <circle cx="180" cy="110" r="35" class="radar-ring" />
-        <circle cx="180" cy="110" r="65" class="radar-ring" />
-        <circle cx="180" cy="110" r="95" class="radar-ring" />
-        <line x1="80" y1="110" x2="280" y2="110" class="radar-crosshair" />
-        <line x1="180" y1="10" x2="180" y2="210" class="radar-crosshair" />
+
+<div class="cx-wrap">
+    <svg viewBox="0 0 800 520" class="cx-svg @(total > 28 ? "cx-dense" : "")" role="img" aria-label="Anomaly constellation of all registered devices">
+        <defs>
+            <radialGradient id="cxGlow" cx="50%" cy="50%" r="50%">
+                <stop offset="0%" stop-color="#1d3146" stop-opacity="0.95" />
+                <stop offset="100%" stop-color="#070b10" stop-opacity="0" />
+            </radialGradient>
+            <linearGradient id="cxSweep" x1="0" y1="0" x2="1" y2="0">
+                <stop offset="0%" stop-color="#33f0b0" stop-opacity="0" />
+                <stop offset="100%" stop-color="#33f0b0" stop-opacity="0.30" />
+            </linearGradient>
+        </defs>
+
+        <circle cx="400" cy="260" r="245" fill="url(#cxGlow)" />
+
+        @foreach (var zone in layout.Zones)
+        {
+            <path d="@ArcPath(zone.Start, zone.End, 62, 228)"
+                  class="cx-zone cx-zone-@(zone.Index % 6) @(IsZoneDim(zone.Name) ? "cx-dim" : "")" />
+        }
+
+        <circle cx="400" cy="260" r="62" class="cx-ring" />
+        <circle cx="400" cy="260" r="105" class="cx-ring" />
+        <circle cx="400" cy="260" r="150" class="cx-ring" />
+        <circle cx="400" cy="260" r="195" class="cx-ring" />
+        <circle cx="400" cy="260" r="228" class="cx-ring cx-ring-outer" />
+
         @for (var i = 0; i < 12; i++)
         {
-            var deg = i * 30.0;
-            var rad = deg * Math.PI / 180.0;
-            var tx1 = 180 + 90 * Math.Cos(rad);
-            var ty1 = 110 + 90 * Math.Sin(rad);
-            var tx2 = 180 + 98 * Math.Cos(rad);
-            var ty2 = 110 + 98 * Math.Sin(rad);
-            <line x1="@(F(tx1))" y1="@(F(ty1))" x2="@(F(tx2))" y2="@(F(ty2))" class="radar-tick" />
+            var rad = i * 30.0 * Math.PI / 180.0;
+            <line x1="@F(400 + 62 * Math.Cos(rad))" y1="@F(260 + 62 * Math.Sin(rad))"
+                  x2="@F(400 + 228 * Math.Cos(rad))" y2="@F(260 + 228 * Math.Sin(rad))" class="cx-spoke" />
         }
-        <g class="radar-sweep-group">
-            <path d="M180,110 L280,110 A100,100 0 0 1 244.3,186.6 Z" class="radar-sweep-fill" />
-            <line x1="180" y1="110" x2="280" y2="110" class="radar-sweep-edge" />
+
+        <g class="cx-sweep">
+            <path d="M400,260 L628,260 A228,228 0 0 1 586.8,390.8 Z" fill="url(#cxSweep)" />
+            <line x1="400" y1="260" x2="628" y2="260" class="cx-sweep-edge" />
         </g>
 
-        @foreach (var (device, point) in Layout)
+        @foreach (var zone in layout.Zones)
         {
-            <line x1="180" y1="110" x2="@(F(point.X))" y2="@(F(point.Y))"
-                  class="constellation-edge @(IsDimmed(device) ? "dimmed" : "")" />
-        }
-
-        @foreach (var (device, point) in Layout)
-        {
-            <g class="node-group @(IsDimmed(device) ? "dimmed" : "") @(_spawnIds.Contains(device.DeviceId) ? "spawn" : "")"
-               @key="device.DeviceId"
-               @onclick="() => OnDeviceSelected.InvokeAsync(device)">
-
-                @if (device.Severity == AnomalySeverity.Anomalous)
-                {
-                    <circle cx="@(F(point.X))" cy="@(F(point.Y))" r="8" class="anomaly-ring" />
-                }
-                @if (device.DeviceId == SelectedDeviceId)
-                {
-                    <circle cx="@(F(point.X))" cy="@(F(point.Y))" r="@(point.Radius + 6)" class="lockon-ring" />
-                }
-                @if (_spawnIds.Contains(device.DeviceId))
-                {
-                    <circle cx="@(F(point.X))" cy="@(F(point.Y))" r="4" class="spawn-ring" />
-                }
-
-                <circle cx="@(F(point.X))" cy="@(F(point.Y))" r="@(point.Radius + 4)"
-                        class="detect-flash" style="animation-delay:@(F(point.PingDelaySeconds))s" />
-
-                <circle cx="@(F(point.X))" cy="@(F(point.Y))" r="@(point.Radius + 7)" class="node-hit" />
-
-                <circle cx="@(F(point.X))" cy="@(F(point.Y))" r="@point.Radius"
-                        class="node @SeverityClass(device.Severity)">
-                    <title>@device.DeviceId (@device.ZoneName): @device.LastValue.ToString("0.##")</title>
-                </circle>
-
-                <text x="@(F(point.X))" y="@(F(point.Y - point.Radius - 7))" class="node-tooltip">@device.DeviceId</text>
+            var mid = (zone.Start + zone.End) / 2;
+            <g class="cx-zone-label-group @(IsZoneDim(zone.Name) ? "cx-dim" : "")">
+                <text x="@F(400 + 242 * Math.Cos(mid))" y="@F(260 + 242 * Math.Sin(mid) + 4)"
+                      text-anchor="@AnchorFor(mid)" class="cx-zone-label">@Trunc(zone.Name) (@zone.Count)</text>
             </g>
         }
 
-        <text x="8" y="200" class="hud-readout">CONTACTS @Devices.Count</text>
-        <text x="8" y="211" class="hud-readout sev-anomalous-text">ANOMALIES @Devices.Count(d => d.Severity == AnomalySeverity.Anomalous)</text>
+        @foreach (var placed in layout.Nodes)
+        {
+            <line x1="400" y1="260" x2="@F(placed.X)" y2="@F(placed.Y)"
+                  class="cx-edge cx-edge-@SeverityName(placed.Device.Severity) @(IsDimmed(placed.Device) ? "cx-dim" : "")" />
+        }
 
-        <circle cx="180" cy="110" r="16" class="hub" />
-        <text x="180" y="113" class="hub-label">GW</text>
+        @foreach (var placed in layout.Nodes)
+        {
+            var device = placed.Device;
+            var radius = NodeRadius(device.Severity);
+            var isSelected = device.DeviceId == SelectedDeviceId;
+
+            <g class="cx-node cx-node-@SeverityName(device.Severity) @(IsDimmed(device) ? "cx-dim" : "") @(isSelected ? "cx-selected" : "") @(_spawnIds.Contains(device.DeviceId) ? "cx-spawn" : "")"
+               @key="device.DeviceId"
+               tabindex="0"
+               role="button"
+               aria-label="@AriaFor(device)"
+               @onclick="() => OnDeviceSelected.InvokeAsync(device)"
+               @onkeydown="e => OnNodeKeyDown(e, device)">
+
+                @if (device.Severity == AnomalySeverity.Anomalous)
+                {
+                    <circle cx="@F(placed.X)" cy="@F(placed.Y)" r="@radius" class="cx-pulse" />
+                    <circle cx="@F(placed.X)" cy="@F(placed.Y)" r="@radius" class="cx-pulse cx-pulse-2" />
+                }
+                @if (isSelected)
+                {
+                    <circle cx="@F(placed.X)" cy="@F(placed.Y)" r="@(radius + 9)" class="cx-lock" />
+                }
+
+                <circle cx="@F(placed.X)" cy="@F(placed.Y)" r="@(radius + 12)" class="cx-hit" />
+                <circle cx="@F(placed.X)" cy="@F(placed.Y)" r="@radius" class="cx-dot">
+                    <title>@device.DeviceId (@device.ZoneName): @F(device.LastValue), @device.Severity</title>
+                </circle>
+
+                <g class="cx-label-group">
+                    <text x="@F(placed.X)" y="@F(placed.Y - radius - 7)"
+                          class="cx-label @(LabelAlwaysVisible(device, isSelected) ? "" : "cx-label-hover")">@ShortId(device.DeviceId)</text>
+                </g>
+
+                @if (isSelected || device.Severity != AnomalySeverity.Healthy)
+                {
+                    <g class="cx-value-group">
+                        <text x="@F(placed.X)" y="@F(placed.Y + radius + 15)"
+                              class="cx-label cx-value cx-value-@SeverityName(device.Severity)">@F(device.LastValue)</text>
+                    </g>
+                }
+            </g>
+        }
+
+        <circle cx="400" cy="260" r="64" fill="url(#cxGlow)" />
+
+        @foreach (var segment in HealthSegments())
+        {
+            <circle cx="400" cy="260" r="40" transform="rotate(-90 400 260)"
+                    class="cx-donut cx-donut-@segment.Css"
+                    stroke-dasharray="@segment.Dash" stroke-dashoffset="@segment.Offset" />
+        }
+
+        <circle cx="400" cy="260" r="31" class="cx-hub" />
+        <text x="400" y="258" class="cx-hub-label">GATEWAY</text>
+        <text x="400" y="272" class="cx-hub-sub">@total nodes</text>
+
+        @if (total == 0)
+        {
+            <g class="cx-empty">
+                <text x="400" y="340" class="cx-empty-text">AWAITING SIGNAL</text>
+            </g>
+        }
     </svg>
-}
 
-<div class="constellation-legend">
-    <span class="legend-item @(_hiddenSeverities.Contains(AnomalySeverity.Healthy) ? "legend-off" : "")"
-          @onclick="() => ToggleSeverity(AnomalySeverity.Healthy)">
-        <i class="dot sev-healthy"></i> Healthy
-    </span>
-    <span class="legend-item @(_hiddenSeverities.Contains(AnomalySeverity.Elevated) ? "legend-off" : "")"
-          @onclick="() => ToggleSeverity(AnomalySeverity.Elevated)">
-        <i class="dot sev-elevated"></i> Elevated
-    </span>
-    <span class="legend-item @(_hiddenSeverities.Contains(AnomalySeverity.Anomalous) ? "legend-off" : "")"
-          @onclick="() => ToggleSeverity(AnomalySeverity.Anomalous)">
-        <i class="dot sev-anomalous"></i> Anomalous
-    </span>
-    <span class="legend-item @(_hiddenSeverities.Contains(AnomalySeverity.Disconnected) ? "legend-off" : "")"
-          @onclick="() => ToggleSeverity(AnomalySeverity.Disconnected)">
-        <i class="dot sev-disconnected"></i> Disconnected
-    </span>
-    <span class="legend-reset" @onclick="ResetFilters">Reset filters</span>
+    <div class="cx-legend" role="group" aria-label="Filter by status">
+        @foreach (var severity in SeverityOrder)
+        {
+            <button type="button"
+                    class="cx-pill cx-pill-@SeverityName(severity) @(_hiddenSeverities.Contains(severity) ? "cx-pill-off" : "")"
+                    aria-pressed="@(_hiddenSeverities.Contains(severity) ? "false" : "true")"
+                    @onclick="() => ToggleSeverity(severity)">
+                <i></i>@severity <b>@CountOf(severity)</b>
+            </button>
+        }
+        <button type="button" class="cx-reset" @onclick="ResetFilters">Reset filters</button>
+    </div>
 </div>
 
 @code {
@@ -126,23 +146,30 @@ else
     [Parameter] public EventCallback OnResetFilters { get; set; }
     [Parameter] public bool ForceSpawnAll { get; set; }
 
-    private const double SweepDurationSeconds = 6.0;
-    private readonly HashSet<AnomalySeverity> _hiddenSeverities = [];
+    private static readonly AnomalySeverity[] SeverityOrder =
+    [
+        AnomalySeverity.Healthy,
+        AnomalySeverity.Elevated,
+        AnomalySeverity.Anomalous,
+        AnomalySeverity.Disconnected
+    ];
 
+    private static readonly double[] Rings = [100, 145, 190];
+
+    private readonly HashSet<AnomalySeverity> _hiddenSeverities = [];
     private readonly HashSet<string> _knownDeviceIds = [];
     private HashSet<string> _spawnIds = [];
 
     protected override void OnParametersSet()
     {
         var currentIds = Devices.Select(d => d.DeviceId).ToHashSet();
-        
+
         if (ForceSpawnAll)
         {
-            // Force all devices to appear as "new" with spawn animation
             _spawnIds = currentIds.ToHashSet();
             _knownDeviceIds.Clear();
             _knownDeviceIds.UnionWith(currentIds);
-            ForceSpawnAll = false; // Reset after one use
+            ForceSpawnAll = false;
         }
         else
         {
@@ -151,7 +178,7 @@ else
         }
     }
 
-    // Public method to trigger spawn animations on all devices
+    // Public API kept from Part 1: the Ingestion page calls these after registering devices.
     public void TriggerSpawnForAll()
     {
         _spawnIds = Devices.Select(d => d.DeviceId).ToHashSet();
@@ -160,7 +187,6 @@ else
         StateHasChanged();
     }
 
-    // Public method to trigger spawn animation on a specific device
     public void TriggerSpawnForDevice(string deviceId)
     {
         if (Devices.Any(d => d.DeviceId == deviceId))
@@ -172,36 +198,111 @@ else
         }
     }
 
-    private List<(DeviceStatus Device, NodePoint Point)> Layout =>
-        Devices
-            .OrderBy(d => d.DeviceId, StringComparer.Ordinal)
-            .Select((device, index) => (device, ComputePoint(device, index, Devices.Count)))
+    // ----- layout: one angular sector per zone, devices spread across three rings so labels never collide -----
+
+    private LayoutResult BuildLayout()
+    {
+        var zones = new List<ZoneSector>();
+        var nodes = new List<PlacedNode>();
+        var total = Devices.Count;
+        if (total == 0)
+        {
+            return new LayoutResult(zones, nodes);
+        }
+
+        var groups = Devices
+            .GroupBy(d => d.ZoneName)
+            .OrderBy(g => g.Key, StringComparer.Ordinal)
             .ToList();
 
-    private static NodePoint ComputePoint(DeviceStatus device, int index, int total)
-    {
-        var angle = total == 0 ? 0 : index * (2 * Math.PI / total);
-        var angleDeg = angle * 180.0 / Math.PI;
-        var radiusFromHub = 35 + Math.Abs(device.DeviceId.GetHashCode()) % 60;
-        var x = 180 + radiusFromHub * Math.Cos(angle);
-        var y = 110 + radiusFromHub * Math.Sin(angle);
-        var nodeRadius = device.Severity switch
+        var gap = groups.Count > 1 ? 0.05 : 0.0;
+        var usable = 2 * Math.PI - gap * groups.Count;
+        var cursor = -Math.PI / 2;
+
+        for (var zoneIndex = 0; zoneIndex < groups.Count; zoneIndex++)
         {
-            AnomalySeverity.Anomalous => 7,
-            AnomalySeverity.Elevated => 6,
-            AnomalySeverity.Disconnected => 5,
-            _ => 5
-        };
-        var pingDelay = angleDeg / 360.0 * SweepDurationSeconds;
-        return new NodePoint(x, y, nodeRadius, pingDelay);
+            var members = groups[zoneIndex].OrderBy(d => d.DeviceId, StringComparer.Ordinal).ToList();
+            var span = groups.Count == 1 ? 2 * Math.PI - 0.03 : usable * members.Count / total;
+            var start = cursor + gap / 2;
+            var end = start + span;
+            zones.Add(new ZoneSector(groups[zoneIndex].Key, start, end, zoneIndex, members.Count));
+
+            var pad = Math.Min(0.06, span * 0.2);
+            for (var j = 0; j < members.Count; j++)
+            {
+                var t = (j + 0.5) / members.Count;
+                var angle = start + pad + t * (span - 2 * pad);
+                var ring = Rings[(j + zoneIndex) % Rings.Length];
+                nodes.Add(new PlacedNode(members[j], 400 + ring * Math.Cos(angle), 260 + ring * Math.Sin(angle)));
+            }
+
+            cursor += span + gap;
+        }
+
+        return new LayoutResult(zones, nodes);
     }
+
+    private static string ArcPath(double startAngle, double endAngle, double innerRadius, double outerRadius)
+    {
+        var large = endAngle - startAngle > Math.PI ? 1 : 0;
+        var (x0, y0) = Point(outerRadius, startAngle);
+        var (x1, y1) = Point(outerRadius, endAngle);
+        var (x2, y2) = Point(innerRadius, endAngle);
+        var (x3, y3) = Point(innerRadius, startAngle);
+
+        return $"M{F(x0)},{F(y0)} A{F(outerRadius)},{F(outerRadius)} 0 {large} 1 {F(x1)},{F(y1)} " +
+               $"L{F(x2)},{F(y2)} A{F(innerRadius)},{F(innerRadius)} 0 {large} 0 {F(x3)},{F(y3)} Z";
+    }
+
+    private static (double X, double Y) Point(double radius, double angle) =>
+        (400 + radius * Math.Cos(angle), 260 + radius * Math.Sin(angle));
+
+    // ----- health donut around the gateway -----
+
+    private List<DonutSegment> HealthSegments()
+    {
+        var segments = new List<DonutSegment>();
+        var total = Devices.Count;
+        if (total == 0)
+        {
+            return segments;
+        }
+
+        const double circumference = 2 * Math.PI * 40;
+        double used = 0;
+
+        foreach (var severity in SeverityOrder)
+        {
+            var count = CountOf(severity);
+            if (count == 0)
+            {
+                continue;
+            }
+
+            var length = circumference * count / total;
+            var visible = Math.Max(0.5, length - (length > 6 ? 2 : 0));
+            segments.Add(new DonutSegment(
+                SeverityName(severity),
+                $"{F(visible)} {F(circumference)}",
+                F(-used)));
+            used += length;
+        }
+
+        return segments;
+    }
+
+    private int CountOf(AnomalySeverity severity) => Devices.Count(d => d.Severity == severity);
+
+    // ----- filtering -----
 
     private bool IsDimmed(DeviceStatus device) =>
         _hiddenSeverities.Contains(device.Severity) ||
         (HighlightZone is not null && device.ZoneName != HighlightZone);
 
-    // Guarded: refuses to hide the last remaining visible severity, so the
-    // legend can never dim every node on the scope at once again.
+    private bool IsZoneDim(string zoneName) =>
+        HighlightZone is not null && zoneName != HighlightZone;
+
+    // Guarded: refuses to hide the last remaining visible severity.
     private void ToggleSeverity(AnomalySeverity severity)
     {
         if (_hiddenSeverities.Contains(severity))
@@ -210,10 +311,9 @@ else
             return;
         }
 
-        const int totalSeverities = 4;
-        if (_hiddenSeverities.Count >= totalSeverities - 1)
+        if (_hiddenSeverities.Count >= SeverityOrder.Length - 1)
         {
-            return; // would hide the last visible one — refuse the toggle
+            return;
         }
 
         _hiddenSeverities.Add(severity);
@@ -225,16 +325,49 @@ else
         await OnResetFilters.InvokeAsync();
     }
 
-    private static string F(double v) => v.ToString("0.##", CultureInfo.InvariantCulture);
-
-    private static string SeverityClass(AnomalySeverity severity) => severity switch
+    private async Task OnNodeKeyDown(KeyboardEventArgs e, DeviceStatus device)
     {
-        AnomalySeverity.Healthy => "sev-healthy",
-        AnomalySeverity.Elevated => "sev-elevated",
-        AnomalySeverity.Anomalous => "sev-anomalous",
-        AnomalySeverity.Disconnected => "sev-disconnected",
-        _ => ""
+        if (e.Key == "Enter" || e.Key == " ")
+        {
+            await OnDeviceSelected.InvokeAsync(device);
+        }
+    }
+
+    // ----- small helpers -----
+
+    private static bool LabelAlwaysVisible(DeviceStatus device, bool isSelected) =>
+        isSelected || device.Severity != AnomalySeverity.Healthy;
+
+    private static int NodeRadius(AnomalySeverity severity) => severity switch
+    {
+        AnomalySeverity.Anomalous => 12,
+        AnomalySeverity.Elevated => 10,
+        _ => 9
     };
 
-    private readonly record struct NodePoint(double X, double Y, int Radius, double PingDelaySeconds);
+    private static string ShortId(string deviceId)
+    {
+        var cut = deviceId.LastIndexOf('-');
+        return cut >= 0 && cut < deviceId.Length - 1 ? deviceId[(cut + 1)..] : deviceId;
+    }
+
+    private static string Trunc(string text) => text.Length > 24 ? text[..23] + "..." : text;
+
+    private static string AnchorFor(double angle)
+    {
+        var cos = Math.Cos(angle);
+        return cos > 0.3 ? "start" : cos < -0.3 ? "end" : "middle";
+    }
+
+    private static string AriaFor(DeviceStatus device) =>
+        $"{device.DeviceId}, {device.Severity}, value {F(device.LastValue)}";
+
+    private static string SeverityName(AnomalySeverity severity) => severity.ToString().ToLowerInvariant();
+
+    private static string F(double value) => value.ToString("0.##", CultureInfo.InvariantCulture);
+
+    private sealed record ZoneSector(string Name, double Start, double End, int Index, int Count);
+    private sealed record PlacedNode(DeviceStatus Device, double X, double Y);
+    private sealed record LayoutResult(List<ZoneSector> Zones, List<PlacedNode> Nodes);
+    private sealed record DonutSegment(string Css, string Dash, string Offset);
 }

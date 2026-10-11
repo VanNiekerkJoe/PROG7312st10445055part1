@@ -1,0 +1,76 @@
+@using System.Globalization
+@using SmartX.Core.Storage
+@using SmartX.Core.Telemetry
+
+@if (Points.Count >= 2)
+{
+    <svg class="spark" viewBox="@ViewBox" preserveAspectRatio="none">
+        <defs>
+            <linearGradient id="sparkGrad" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stop-color="#ffcb47" stop-opacity="0.35" />
+                <stop offset="100%" stop-color="#ffcb47" stop-opacity="0" />
+            </linearGradient>
+        </defs>
+        <polygon class="spark-area" points="@AreaPoints" fill="url(#sparkGrad)" />
+        <polyline class="spark-line" fill="none" points="@LinePoints" />
+        @for (var i = 0; i < Points.Count; i++)
+        {
+            var point = Points[i];
+            if (point.Severity == AnomalySeverity.Healthy)
+            {
+                continue;
+            }
+
+            <circle class="spark-dot spark-dot-@point.Severity.ToString().ToLowerInvariant()"
+                    cx="@Format(X(i))" cy="@Format(Y(point.Value))" r="3" />
+        }
+    </svg>
+    <div class="spark-axis"><span>min @Format(_min)</span><span>max @Format(_max)</span></div>
+}
+else
+{
+    <div class="spark spark-empty">Waiting for history...</div>
+}
+
+@code {
+    private const int Width = 300;
+    private const int Height = 80;
+
+    private double _min;
+    private double _max = 1;
+
+    [Parameter] public IReadOnlyList<HistoryPoint> Points { get; set; } = [];
+
+    private string ViewBox => $"0 0 {Width} {Height}";
+
+    private string LinePoints =>
+        string.Join(" ", Points.Select((p, i) => $"{Format(X(i))},{Format(Y(p.Value))}"));
+
+    private string AreaPoints =>
+        $"4,{Height} " + LinePoints + $" {Format(X(Points.Count - 1))},{Height}";
+
+    protected override void OnParametersSet()
+    {
+        if (Points.Count == 0)
+        {
+            return;
+        }
+
+        _min = Points.Min(p => p.Value);
+        _max = Points.Max(p => p.Value);
+        if (Math.Abs(_max - _min) < 0.0001)
+        {
+            _min -= 1;
+            _max += 1;
+        }
+    }
+
+    private double X(int index) =>
+        Points.Count <= 1 ? 4 : 4 + index * (Width - 8.0) / (Points.Count - 1);
+
+    private double Y(double value) =>
+        Height - 6 - (value - _min) / (_max - _min) * (Height - 12);
+
+    // Always invariant: a comma decimal separator (e.g. en-ZA) would corrupt the SVG coordinates.
+    private static string Format(double value) => value.ToString("0.#", CultureInfo.InvariantCulture);
+}

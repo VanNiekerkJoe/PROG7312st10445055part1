@@ -10,6 +10,7 @@ namespace SmartX.Client.Services;
 public sealed class TelemetryHubClient : IAsyncDisposable
 {
     private readonly HubConnection _connection;
+    private readonly SemaphoreSlim _startLock = new(1, 1);
     private bool _started;
 
     public event Action<DeviceStatus>? StatusUpdated;
@@ -46,10 +47,20 @@ public sealed class TelemetryHubClient : IAsyncDisposable
 
     public async Task EnsureStartedAsync()
     {
-        if (_started) return;
-        await _connection.StartAsync();
-        _started = true;
-        ConnectionStateChanged?.Invoke();
+        // Several consumers (the page and the app-wide LiveStateService) can
+        // call this at the same time; serialise them so StartAsync runs once.
+        await _startLock.WaitAsync();
+        try
+        {
+            if (_started) return;
+            await _connection.StartAsync();
+            _started = true;
+            ConnectionStateChanged?.Invoke();
+        }
+        finally
+        {
+            _startLock.Release();
+        }
     }
 
     public HubConnectionState State => _connection.State;

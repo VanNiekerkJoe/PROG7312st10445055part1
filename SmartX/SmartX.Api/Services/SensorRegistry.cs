@@ -272,6 +272,14 @@ public sealed class SensorRegistry
         return status;
     }
 
+    /// <summary>
+    /// Z-score a value *would* get against this device's current rolling
+    /// baseline, without recording it. Used at ingest time to decide whether
+    /// a packet belongs in the priority lane before it is queued.
+    /// </summary>
+    public double PeekZScore(string deviceId, float value) =>
+        _baselines.TryGetValue(deviceId, out var baseline) ? baseline.ZScoreFor(value) : 0;
+
     public void ResetThroughputWindow() => _throughputCounters.Clear();
 
     private static DeploymentNode? FindNode(DeploymentNode node, string id)

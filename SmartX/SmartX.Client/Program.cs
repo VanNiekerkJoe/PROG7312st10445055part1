@@ -13,4 +13,10 @@ builder.RootComponents.Add<SmartX.Client.App>("#app");
 builder.Services.AddSingleton(_ => new TelemetryApiClient(apiBaseAddress));
 builder.Services.AddSingleton(_ => new TelemetryHubClient($"{apiBaseAddress}/hubs/telemetry"));
 
+// Part 2: command stream clients, plus one app-lifetime store that keeps
+// device/command/feed state alive while the user navigates between pages.
+builder.Services.AddSingleton(_ => new CommandApiClient(apiBaseAddress));
+builder.Services.AddSingleton(_ => new CommandHubClient($"{apiBaseAddress}/hubs/commands"));
+builder.Services.AddSingleton<LiveStateService>();
+
 await builder.Build().RunAsync();

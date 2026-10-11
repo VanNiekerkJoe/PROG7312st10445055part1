@@ -19,7 +19,10 @@ public sealed class TelemetrySeeder(SensorRegistry registry, IHubContext<Telemet
     private const int TicksPerThroughputWindow = 30; // ~60s at a 2s tick
 
     private readonly Random _random = new();
-    private bool _isRunning = true;
+    // Part 2: devices now report through POST /api/telemetry/ingest (see
+    // SmartX.DeviceSimulator), so the Part 1 in-process seeder starts switched
+    // off. It can still be started from the dashboard as a fallback.
+    private bool _isRunning = false;
     private readonly SemaphoreSlim _semaphore = new(1, 1);
     private CancellationTokenSource? _stoppingTokenSource;
 
@@ -51,9 +54,8 @@ public sealed class TelemetrySeeder(SensorRegistry registry, IHubContext<Telemet
         {
             if (_isRunning) return;
             _isRunning = true;
-            _stoppingTokenSource = new CancellationTokenSource();
-            // Restart the background service
-            _ = Task.Run(() => ExecuteAsync(_stoppingTokenSource.Token));
+            // The hosted ExecuteAsync loop is still alive and simply resumes
+            // once _isRunning flips, so no second loop is started here.
             logger.LogInformation("Telemetry seeder started.");
         }
         finally

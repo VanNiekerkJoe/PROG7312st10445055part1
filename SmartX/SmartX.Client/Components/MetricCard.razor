@@ -1,10 +1,69 @@
-<div class="metric-card">
-    <p class="metric-label">@Label</p>
+@using System.Globalization
+
+<div class="metric-card @AccentClass">
+    <div class="metric-top">
+        <p class="metric-label">@Label</p>
+        @if (!string.IsNullOrEmpty(Icon))
+        {
+            <span class="metric-icon" aria-hidden="true">@Icon</span>
+        }
+    </div>
+
     <p class="metric-value @ValueClass">@Value</p>
+
+    @if (!string.IsNullOrEmpty(Hint))
+    {
+        <p class="metric-hint">@Hint</p>
+    }
+
+    @if (Series is not null && Series.Count >= 2)
+    {
+        <svg class="metric-spark" viewBox="0 0 120 32" preserveAspectRatio="none" aria-hidden="true">
+            <polygon class="area" points="@AreaPoints()" />
+            <polyline points="@LinePoints()" />
+        </svg>
+    }
 </div>
 
 @code {
     [Parameter, EditorRequired] public string Label { get; set; } = "";
     [Parameter, EditorRequired] public string Value { get; set; } = "";
     [Parameter] public string ValueClass { get; set; } = "";
+
+    /// <summary>Optional: small caption under the number.</summary>
+    [Parameter] public string? Hint { get; set; }
+
+    /// <summary>Optional: a short glyph shown in the corner badge.</summary>
+    [Parameter] public string? Icon { get; set; }
+
+    /// <summary>Optional colour accent: green, red, blue, amber or orange.</summary>
+    [Parameter] public string? Accent { get; set; }
+
+    /// <summary>Optional: recent values, drawn as a mini trend line.</summary>
+    [Parameter] public IReadOnlyList<double>? Series { get; set; }
+
+    private string AccentClass => string.IsNullOrEmpty(Accent) ? "" : "metric-" + Accent;
+
+    private string LinePoints() =>
+        string.Join(" ", Coordinates().Select(c => $"{Fmt(c.X)},{Fmt(c.Y)}"));
+
+    private string AreaPoints() =>
+        "0,32 " + LinePoints() + " 120,32";
+
+    private IEnumerable<(double X, double Y)> Coordinates()
+    {
+        var data = Series!;
+        var min = data.Min();
+        var max = data.Max();
+        var range = Math.Abs(max - min) < 0.0001 ? 1 : max - min;
+
+        for (var i = 0; i < data.Count; i++)
+        {
+            var x = i * 120.0 / (data.Count - 1);
+            var y = 28 - (data[i] - min) / range * 24;
+            yield return (x, y);
+        }
+    }
+
+    private static string Fmt(double value) => value.ToString("0.#", CultureInfo.InvariantCulture);
 }

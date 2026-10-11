@@ -1,0 +1,35 @@
+@using SmartX.Client.Services
+@inject LiveStateService Live
+@implements IDisposable
+
+<nav class="topnav">
+    <a class="topnav-brand" href="/">Smart-X</a>
+
+    <div class="topnav-links">
+        <NavLink class="topnav-link" href="/" Match="NavLinkMatch.All">Home</NavLink>
+        <NavLink class="topnav-link" href="/ingestion">Sensor ingestion</NavLink>
+        <NavLink class="topnav-link" href="/commands">Command stream</NavLink>
+        <span class="topnav-link topnav-disabled" title="Implemented in the final PoE">Mesh topology</span>
+    </div>
+
+    <span class="topnav-live @(Live.IsConnected ? "topnav-live-on" : "topnav-live-off")">
+        @(Live.IsConnected ? "live" : "offline")
+    </span>
+</nav>
+
+@code {
+    protected override void OnInitialized()
+    {
+        Live.Changed += OnLiveChanged;
+    }
+
+    private void OnLiveChanged()
+    {
+        _ = InvokeAsync(StateHasChanged);
+    }
+
+    public void Dispose()
+    {
+        Live.Changed -= OnLiveChanged;
+    }
+}
