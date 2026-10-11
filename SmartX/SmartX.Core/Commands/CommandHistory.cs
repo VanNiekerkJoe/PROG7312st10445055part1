@@ -2,13 +2,13 @@ namespace SmartX.Core.Commands;
 
 /// <summary>
 /// Stack&lt;T&gt;-backed command history. Every manual override is pushed onto
-/// the stack; "Undo" pops the most recent one (LIFO) and produces its inverse
-/// command. A separate append-only log keeps the full audit trail (including
-/// the undo commands themselves) for the history panel.
+/// the stack (up to the latest 200); "Undo" pops the most recent one (LIFO)
+/// and produces its inverse command. Undo commands are only recorded in the
+/// bounded audit log and are not themselves undoable.
 /// </summary>
 public sealed class CommandHistory
 {
-    private const int MaxLogEntries = 200;
+    private const int MaxEntries = 200;
 
     private readonly object _lock = new();
     private readonly Stack<DeviceCommand> _undoStack = new();
@@ -24,7 +24,7 @@ public sealed class CommandHistory
         var command = new DeviceCommand(Guid.NewGuid(), deviceId, type, DateTimeOffset.UtcNow, source, false, null);
         lock (_lock)
         {
-            _undoStack.Push(command);
+            PushUndoable(command);
             Append(command);
         }
         return command;
@@ -71,9 +71,25 @@ public sealed class CommandHistory
     private void Append(DeviceCommand command)
     {
         _log.Add(command);
-        if (_log.Count > MaxLogEntries)
+        if (_log.Count > MaxEntries)
         {
             _log.RemoveAt(0);
+        }
+    }
+
+    private void PushUndoable(DeviceCommand command)
+    {
+        _undoStack.Push(command);
+        if (_undoStack.Count <= MaxEntries)
+        {
+            return;
+        }
+
+        var retained = _undoStack.Take(MaxEntries).Reverse().ToArray();
+        _undoStack.Clear();
+        foreach (var entry in retained)
+        {
+            _undoStack.Push(entry);
         }
     }
 }

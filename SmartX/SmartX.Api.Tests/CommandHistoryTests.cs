@@ -28,6 +28,39 @@ public class CommandHistoryTests
     }
 
     [Fact]
+    public void Undo_CannotUndoAnUndoCommand()
+    {
+        var history = new CommandHistory();
+        history.Issue("DEV1", CommandType.PumpOn, "test");
+
+        var undo = history.Undo();
+
+        Assert.NotNull(undo);
+        Assert.True(undo.IsUndo);
+        Assert.Null(history.Undo());
+        Assert.Equal(0, history.UndoDepth);
+    }
+
+    [Fact]
+    public void UndoStack_KeepsOnlyTheMostRecent200Commands()
+    {
+        var history = new CommandHistory();
+        for (var i = 0; i < 201; i++)
+        {
+            history.Issue($"DEV{i}", CommandType.PumpOn, "test");
+        }
+
+        Assert.Equal(200, history.UndoDepth);
+        Assert.Equal("DEV200", history.Undo()!.DeviceId);
+        for (var i = 199; i >= 1; i--)
+        {
+            Assert.Equal($"DEV{i}", history.Undo()!.DeviceId);
+        }
+
+        Assert.Null(history.Undo());
+    }
+
+    [Fact]
     public void UndoDepth_TracksStackSize_AndLogKeepsEverything()
     {
         var history = new CommandHistory();
