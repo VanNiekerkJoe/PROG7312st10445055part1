@@ -171,10 +171,10 @@
                         {
                             <div class="cs-cmd-group">
                                 <span class="cs-cmd-name">@cmdGroup.Name</span>
-                                <button class="cs-cmd-btn cs-cmd-on" disabled="@_busy" @onclick="() => SendAsync(cmdGroup.On)">
+                                <button class="cs-cmd-btn @CommandButtonClass(selected.DeviceId, cmdGroup.On)" aria-pressed="@IsCommandActive(selected.DeviceId, cmdGroup.On)" disabled="@_busy" @onclick="() => SendAsync(cmdGroup.On)">
                                     <span>&#9654;</span> @ShortLabel(cmdGroup.On)
                                 </button>
-                                <button class="cs-cmd-btn cs-cmd-off" disabled="@_busy" @onclick="() => SendAsync(cmdGroup.Off)">
+                                <button class="cs-cmd-btn @CommandButtonClass(selected.DeviceId, cmdGroup.Off)" aria-pressed="@IsCommandActive(selected.DeviceId, cmdGroup.Off)" disabled="@_busy" @onclick="() => SendAsync(cmdGroup.Off)">
                                     <span>&#9632;</span> @ShortLabel(cmdGroup.Off)
                                 </button>
                             </div>
@@ -532,12 +532,32 @@
 
     private sealed record CachedSuggestion(SuggestedAction Suggestion, DateTimeOffset LastObservedAt);
 
-    private string OutputText(string deviceId) => Live.OutputStateFor(deviceId) switch
+    private bool IsCommandActive(string deviceId, CommandType command)
     {
-        true => "ON / OPEN",
-        false => "OFF / CLOSED",
-        _ => "no command"
-    };
+        var state = Live.OutputStateFor(deviceId, command);
+        return state is not null && state.Value == command.TurnsOutputOn();
+    }
+
+    private string CommandButtonClass(string deviceId, CommandType command)
+    {
+        var outputState = Live.OutputStateFor(deviceId, command);
+        if (outputState is null)
+        {
+            return "cs-cmd-inactive";
+        }
+
+        return outputState.Value == command.TurnsOutputOn()
+            ? command.TurnsOutputOn() ? "cs-cmd-active-on" : "cs-cmd-active-off"
+            : "cs-cmd-inactive";
+    }
+
+    private string OutputText(string deviceId) =>
+        $"Pump {OutputLabel(Live.OutputStateFor(deviceId, CommandType.PumpOn), "ON", "OFF")} / " +
+        $"Relay {OutputLabel(Live.OutputStateFor(deviceId, CommandType.RelayOn), "ON", "OFF")} / " +
+        $"Valve {OutputLabel(Live.OutputStateFor(deviceId, CommandType.ValveOpen), "OPEN", "CLOSED")}";
+
+    private static string OutputLabel(bool? state, string on, string off) =>
+        state is null ? "—" : state.Value ? on : off;
 
     private static string ShortLabel(CommandType type) => type switch
     {

@@ -104,12 +104,12 @@ public sealed class LiveStateService : IDisposable
     public DeviceStatus? Find(string? deviceId) =>
         deviceId is not null && _statuses.TryGetValue(deviceId, out var status) ? status : null;
 
-    /// <summary>Output state implied by the most recent command sent to the device, or null if none.</summary>
-    public bool? OutputStateFor(string deviceId)
+    /// <summary>Current state for a command group, or null if no command in that group is known.</summary>
+    public bool? OutputStateFor(string deviceId, CommandType onCommand)
     {
         foreach (var command in _commands)
         {
-            if (command.DeviceId == deviceId)
+            if (command.DeviceId == deviceId && SameOutputGroup(command.Type, onCommand))
             {
                 return command.Type.TurnsOutputOn();
             }
@@ -117,6 +117,15 @@ public sealed class LiveStateService : IDisposable
 
         return null;
     }
+
+    private static bool SameOutputGroup(CommandType command, CommandType onCommand) =>
+        onCommand switch
+        {
+            CommandType.PumpOn => command is CommandType.PumpOn or CommandType.PumpOff,
+            CommandType.RelayOn => command is CommandType.RelayOn or CommandType.RelayOff,
+            CommandType.ValveOpen => command is CommandType.ValveOpen or CommandType.ValveClose,
+            _ => false
+        };
 
     /// <summary>Idempotent: safe to call from the layout and from any page; retries if the API wasn't up yet.</summary>
     public async Task StartAsync()
