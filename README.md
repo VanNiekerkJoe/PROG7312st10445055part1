@@ -197,7 +197,7 @@ Every growing structure has a limit, because a long-running gateway cannot let a
 | Structure | Bound | Behaviour at the limit |
 |---|---|---|
 | Standard ingest lane | 5000 packets | `Enqueue` returns `false` (back-pressure) |
-| Undo stack | 50 commands | The oldest undo entry is discarded when a new command is pushed |
+| Undo stack | 200 commands | The oldest undo entry is discarded when a new command is pushed |
 | Audit log | 200 entries | The oldest entry is dequeued |
 | History per device | 300 points | The oldest timestamp is removed |
 
@@ -272,52 +272,77 @@ Type a term (for example `pump`) in the device search, choose a category or stat
 `SmartX.Core/Insights/ActionPatternEngine.cs` learns from operator behaviour with a **first-order Markov-style transition table**:
 
 ```
-context  --(weight)-->  follow-up command
+context  --(recency-decayed weight)-->  follow-up command
 ```
 
-A **context** is an alert (`alert:Power:Anomalous`) or an operator search (`search:pump a`). Whenever an operator issues a manual command within **90 seconds** of a context, the weight of that (context, follow-up) pair is increased.
+A **context** is an alert (`alert:Power:Anomalous`) or an operator search (`search:pump a`). Whenever an operator issues a manual command within **90 seconds** of a context, the weight of that (context, follow-up) pair increases. The data structure is a nested `Dictionary`: `context -> follow-up -> (real weight, demo weight, timestamp)`.
 
-### Ranking
+### How learning stays honest
+
+| Rule | Why it matters |
+|---|---|
+| **One command teaches each distinct context once.** If an operator searches "pump" three times and then issues one command, that is one observation, not three. | Without this, repeated searching would inflate a pattern. |
+| **Commands taken from a suggestion are not learned from.** The *Apply* button sends `FromSuggestion = true`, and `CommandService` skips `ObserveCommand` for it. | Accepting a suggestion shows obedience, not independent behaviour. Learning from it would make the engine reinforce its own output. |
+| **An alert only teaches about commands sent to the device that raised it.** | A command to one device says nothing about another. |
+| **Suggestions only target devices that currently exist.** Search suggestions are checked against the live device list, and `RetainOnly` (called on the ingest sync tick, like the other stores) purges what was learned about removed devices. | Stops stale suggestions pointing at deleted devices. |
+| **Search matching is by prefix, from 3 characters.** "pum" and "pump a" both find a learned "pump"; "ump" and "p" do not. | Loose substring matching let a short term match half the table. |
+
+### Ranking and confidence
 
 ```
-confidence(context, command) = weight(context, command) / sum of weights for that context
+confidence(context, command) = weight / (total weight for the context + 1)
 ```
 
-A pair needs a minimum support before it is suggested, so one-offs are ignored.
+The "+ 1" is a prior (add-one smoothing). Two observations of the same command give a confidence of about 0.67, not 1.0, and confidence only approaches 1.0 as evidence accumulates. This also keeps learned suggestions on a sensible scale next to the cold-start rules (0.4 to 0.55).
+
+A learned pattern needs **minimum support of 1.5** recency-weighted observations: two fresh observations, or three that are one half-life old. A single one-off never qualifies. Only the best follow-up and, if it has at least half the leader's weight, one runner-up are shown, so the panel does not offer "Relay ON" and "Relay OFF" side by side because of a single stray command.
+
+Results are ordered by confidence, then learned before rule before watch-list, then device ID, so the order is stable.
 
 ### Recency decay
 
-Operator habits change, so old behaviour should count for less. Every observation carries an exponentially decaying weight:
+Operator habits change, so old behaviour counts for less. Every weight decays exponentially:
 
 ```
-weight(observation) = 0.5 ^ (age / half-life)
+weight(now) = weight(then) * 0.5 ^ (age / half-life)
 ```
 
-The half-life is a named constant (`PatternHalfLife`, 30 minutes by default). A command issued one half-life ago counts for half as much as one issued now; after two half-lives, a quarter. Decay is applied lazily when a pair is read or updated, so there is no background timer. Practical effects:
+- **Learned patterns:** half-life of **7 days** (`ActionPatternOptions.PatternHalfLife`).
+- **Watch-list alert counts:** half-life of **6 hours** (`WatchHalfLife`). A device is "misbehaving lately", not forever.
+
+Decay is applied lazily when a pair is read or updated, so there is no background timer. The engine takes a `TimeProvider`, so the unit tests move a manual clock forward (two half-lives, 120 days) instead of waiting. Practical effects:
 
 - Recent behaviour outranks old behaviour, so if the operator changes their routine, the suggestion changes with them.
-- Patterns the operator stopped using fade below the support threshold and disappear on their own, which also keeps the table from growing forever.
+- Evidence that has decayed below 0.05 is **deleted**, and the number of contexts is capped at 200 (weakest evicted first), so memory stays bounded.
 - Confidence is a recency-weighted relative frequency, not a raw count.
+
+All tunables (`FollowWindow`, half-lives, `MinSupport`, `PriorWeight`, `WatchThreshold`, `PruneBelow`, caps) live in the `ActionPatternOptions` record.
 
 ### Suggestion sources
 
 | Source | Trigger | Shown as |
 |---|---|---|
-| **Learned (alert)** | An alert context has pairs above the support threshold | "Operators chose Relay OFF in N of M follow-ups after similar Power Anomalous alerts" |
-| **Learned (search)** | The operator is searching a term that previously preceded commands | "This command followed the search 'pump' in N of M workflows" |
-| **Cold-start rules** | A problem device has no learned pattern yet (for example anomalous Power suggests Relay OFF) | Rule-based suggestion |
-| **Watch-list** | A device has raised 3 or more alerts this session | "Inspect <device>" (no command is applied automatically) |
+| **Learned (alert)** | An alert context has a pair above the support threshold | "Recency-weighted operator evidence for Relay OFF is 2.9 of 3.0 effective observations after similar Power Anomalous alerts" |
+| **Learned (search)** | The operator is searching a term that previously preceded commands | "This command followed the search 'pump' with 3.0 of 3.0 recency-weighted effective observations" |
+| **Cold-start rules** | A problem device has no learned alert pattern yet (for example anomalous Power suggests Relay OFF) | Rule-based suggestion |
+| **Watch-list** | A device's recency-weighted alert count reaches 2.5 (about three alerts in a few hours) | "Inspect <device>" (no command is applied automatically) |
 
-Suggestions are sorted by confidence and shown in the **Suggested actions / Automated insights** panel on the dashboard, before the operator searches for them, with a confidence bar and an **Apply** button. Wording is deliberately cautious: learned responses are presented as workflow preferences, not diagnoses, and tell the operator to confirm the device's state first.
+Suggestions appear in the **Suggested actions / Automated insights** panel before the operator searches for them, with a confidence bar and an **Apply** button. Wording is deliberately cautious: learned responses are presented as workflow preferences, not diagnoses, and tell the operator to confirm the device's state first.
 
 ### Cold start and demo data (stated openly)
 
-A learning system has nothing to suggest on first launch, and the engine's state is held **in memory**, so it resets when the API restarts. To handle this, the engine has two cold-start mechanisms:
+A learning system has nothing to suggest on first launch, and the engine's state is held **in memory**, so it resets when the API restarts. Two cold-start mechanisms cover this:
 
 1. **Rules** (above), which cover problem devices with no history.
-2. **Demo patterns:** the **Train demo patterns** button calls `SeedDemoPatterns`, which pre-loads an *illustrative* operator history so the learned path can be demonstrated without waiting for real operator behaviour.
+2. **Demo patterns:** the **Train demo patterns** button calls `SeedDemoPatterns`, which pre-loads an *illustrative* operator history so the learned path can be demonstrated without waiting for real behaviour.
 
-Seeded patterns are **demonstration data, not real operator history**. They exist only so the learned-suggestion path can be shown in a short demo, and they are subject to the same recency decay as real observations. To see genuinely learned behaviour without seeding: trigger an alert on a device, issue the same command within 90 s, and repeat; after the minimum support is met the suggestion appears. Persisting the table to disk or a database is out of scope for this part and is listed under limitations.
+Seeded patterns are **demonstration data, not real operator history**, and the engine treats them that way:
+
+- Demo weight is stored **separately** from real weight, and any suggestion that relies on it says so in its text ("This pattern comes from seeded demo data, not real operator history", or "Part of this evidence is seeded demo data" once real observations have been added on top).
+- Seeding is **idempotent**: it sets the demo values instead of adding to them, so pressing the button repeatedly changes nothing.
+- Demo data decays and is pruned like everything else.
+
+To see genuinely learned behaviour without seeding: trigger an alert on a device, issue the same command within 90 s, and repeat; after minimum support is met the suggestion appears. Persisting the table to disk or a database is out of scope for this part and is listed under limitations.
 
 ---
 
@@ -383,7 +408,7 @@ dotnet test SmartX.Api.Tests
 | `IngestQueueTests` | FIFO order, priority bypass, equal-urgency tie-breaking, back-pressure at the cap |
 | `CommandHistoryTests` | LIFO undo order, empty-stack undo returns nothing, **undoing an undo is not possible** (inverse commands are never pushed), undo stack cap evicts the oldest entry, audit log cap |
 | `SensorRegistryTests` / `PipelineStructuresTests` | MAC lookup and sync, duplicate-alert suppression, sorted history ordering and capacity |
-| `ActionPatternEngineTests` | Learned, rule-based and watch-list paths, minimum support, **recency decay lets recent behaviour outrank older behaviour** |
+| `ActionPatternEngineTests` | Learned, rule-based and watch-list paths; minimum support; smoothed confidence; **decay on an injected clock** (evidence halves, then is pruned); watch-list fades; repeated searches credited once; weak runner-up hidden; demo data labelled and idempotent; removed devices purged; prefix-only search matching; stable ordering |
 | `CoreDomainTests`, `DeploymentTreeValidatorTests` | Part 1: operator overloads, jagged-array batching, recursive tree validation |
 
 ---
