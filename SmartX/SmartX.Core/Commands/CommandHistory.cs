@@ -12,7 +12,7 @@ public sealed class CommandHistory
 
     private readonly object _lock = new();
     private readonly Stack<DeviceCommand> _undoStack = new();
-    private readonly List<DeviceCommand> _log = [];
+    private readonly Queue<DeviceCommand> _log = new();
 
     public int UndoDepth
     {
@@ -62,18 +62,16 @@ public sealed class CommandHistory
     {
         lock (_lock)
         {
-            var copy = new List<DeviceCommand>(_log);
-            copy.Reverse();
-            return copy;
+            return _log.Reverse().ToArray();
         }
     }
 
     private void Append(DeviceCommand command)
     {
-        _log.Add(command);
+        _log.Enqueue(command);
         if (_log.Count > MaxEntries)
         {
-            _log.RemoveAt(0);
+            _log.Dequeue();
         }
     }
 

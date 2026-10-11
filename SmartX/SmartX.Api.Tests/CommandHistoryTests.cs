@@ -74,6 +74,24 @@ public class CommandHistoryTests
         Assert.True(history.Snapshot()[0].IsUndo);
     }
 
+    [Fact]
+    public void AuditLog_KeepsNewest200EntriesInNewestFirstOrder()
+    {
+        var history = new CommandHistory();
+        for (var i = 0; i < 200; i++)
+        {
+            history.Issue($"DEV{i}", CommandType.PumpOn, "test");
+        }
+
+        history.Undo();
+
+        var snapshot = history.Snapshot();
+        Assert.Equal(200, snapshot.Count);
+        Assert.True(snapshot[0].IsUndo);
+        Assert.Equal("DEV199", snapshot[1].DeviceId);
+        Assert.Equal("DEV1", snapshot[^1].DeviceId);
+    }
+
     [Theory]
     [InlineData(CommandType.PumpOn, CommandType.PumpOff)]
     [InlineData(CommandType.RelayOff, CommandType.RelayOn)]
