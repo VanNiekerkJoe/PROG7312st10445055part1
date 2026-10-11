@@ -9,7 +9,10 @@ public sealed record HistoryPoint(DateTimeOffset Timestamp, double Value, Anomal
 /// by timestamp (one per device). The tree keeps entries ordered as they are
 /// inserted, so the dashboard can read "the last N points, oldest first"
 /// straight off the structure and render a timeline graph without ever
-/// sorting at query time. Insert / remove are O(log n).
+/// sorting at query time. Insert / remove are O(log n). Latest() walks values
+/// to skip older points (O(n)); this is bounded by the 300-point per-device
+/// capacity. A SortedList would enable indexed reads but make inserts/removes
+/// O(n), so the tree is preferred for the current write-and-cap workload.
 /// </summary>
 public sealed class SortedHistoryLog(int capacityPerDevice = 300)
 {
