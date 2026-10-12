@@ -74,7 +74,13 @@ public sealed class SensorRegistry
 
             // Already inside the _treeLock, so a plain increment (no
             // Interlocked needed) is safe here.
-            var deviceId = $"{parentSubZoneId}-DEV{++_deviceSequence}";
+            string deviceId;
+            do
+            {
+                deviceId = $"{parentSubZoneId}-DEV{++_deviceSequence}";
+            }
+            while (FindNode(_root, deviceId) is not null);
+
             var device = new DeploymentNode
             {
                 Id = deviceId,

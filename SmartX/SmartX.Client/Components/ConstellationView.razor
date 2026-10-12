@@ -1,8 +1,9 @@
 @using System.Globalization
 
 @{
-    var layout = BuildLayout();
-    var total = Devices.Count;
+    var visibleDevices = FilteredDevices;
+    var layout = BuildLayout(visibleDevices);
+    var total = visibleDevices.Count;
 }
 
 <div class="cx-wrap">
@@ -23,7 +24,7 @@
         @foreach (var zone in layout.Zones)
         {
             <path d="@ArcPath(zone.Start, zone.End, 62, 228)"
-                  class="cx-zone cx-zone-@(zone.Index % 6) @(IsZoneDim(zone.Name) ? "cx-dim" : "")" />
+                  class="cx-zone cx-zone-@(zone.Index % 6)" />
         }
 
         <circle cx="400" cy="260" r="62" class="cx-ring" />
@@ -47,7 +48,7 @@
         @foreach (var zone in layout.Zones)
         {
             var mid = (zone.Start + zone.End) / 2;
-            <g class="cx-zone-label-group @(IsZoneDim(zone.Name) ? "cx-dim" : "")">
+            <g class="cx-zone-label-group">
                 <text x="@F(400 + 242 * Math.Cos(mid))" y="@F(260 + 242 * Math.Sin(mid) + 4)"
                       text-anchor="@AnchorFor(mid)" class="cx-zone-label">@Trunc(zone.Name) (@zone.Count)</text>
             </g>
@@ -65,7 +66,7 @@
             var radius = NodeRadius(device.Severity);
             var isSelected = device.DeviceId == SelectedDeviceId;
 
-            <g class="cx-node cx-node-@SeverityName(device.Severity) @(IsSeverityHidden(device) ? "cx-dim" : "") @((HighlightZone is not null && device.ZoneName != HighlightZone) ? "cx-outside-zone" : "") @(isSelected ? "cx-selected" : "") @(_spawnIds.Contains(device.DeviceId) ? "cx-spawn" : "")"
+            <g class="cx-node cx-node-@SeverityName(device.Severity) @(IsSeverityHidden(device) ? "cx-dim" : "") @(isSelected ? "cx-selected" : "") @(_spawnIds.Contains(device.DeviceId) ? "cx-spawn" : "")"
                @key="device.DeviceId"
                tabindex="0"
                role="button"
@@ -160,6 +161,9 @@
 
     private readonly HashSet<string> _knownDeviceIds = [];
     private HashSet<string> _spawnIds = [];
+    private List<DeviceStatus> FilteredDevices => HighlightZone is null
+        ? Devices
+        : Devices.Where(device => IsSameZone(device.ZoneName, HighlightZone)).ToList();
 
     protected override void OnParametersSet()
     {
@@ -201,17 +205,17 @@
 
     // ----- layout: one angular sector per zone, devices spread across three rings so labels never collide -----
 
-    private LayoutResult BuildLayout()
+    private LayoutResult BuildLayout(IReadOnlyList<DeviceStatus> devices)
     {
         var zones = new List<ZoneSector>();
         var nodes = new List<PlacedNode>();
-        var total = Devices.Count;
+        var total = devices.Count;
         if (total == 0)
         {
             return new LayoutResult(zones, nodes);
         }
 
-        var groups = Devices
+        var groups = devices
             .GroupBy(d => d.ZoneName)
             .OrderBy(g => g.Key, StringComparer.Ordinal)
             .ToList();
@@ -263,7 +267,7 @@
     private List<DonutSegment> HealthSegments()
     {
         var segments = new List<DonutSegment>();
-        var total = Devices.Count;
+        var total = FilteredDevices.Count;
         if (total == 0)
         {
             return segments;
@@ -292,19 +296,17 @@
         return segments;
     }
 
-    private int CountOf(AnomalySeverity severity) => Devices.Count(d => d.Severity == severity);
+    private int CountOf(AnomalySeverity severity) => FilteredDevices.Count(d => d.Severity == severity);
 
     // ----- filtering -----
 
-    private bool IsDimmed(DeviceStatus device) =>
-        HiddenSeverities.Contains(device.Severity) ||
-        (HighlightZone is not null && device.ZoneName != HighlightZone);
+    private bool IsDimmed(DeviceStatus device) => HiddenSeverities.Contains(device.Severity);
 
     private bool IsSeverityHidden(DeviceStatus device) =>
         HiddenSeverities.Contains(device.Severity);
 
-    private bool IsZoneDim(string zoneName) =>
-        HighlightZone is not null && zoneName != HighlightZone;
+    private static bool IsSameZone(string left, string right) =>
+        string.Equals(left.Trim(), right.Trim(), StringComparison.OrdinalIgnoreCase);
 
     // Guarded: refuses to hide the last remaining visible severity.
     private Task ToggleSeverity(AnomalySeverity severity) =>

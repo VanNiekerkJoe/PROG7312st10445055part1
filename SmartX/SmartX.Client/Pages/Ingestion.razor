@@ -49,14 +49,14 @@
         </div>
     }
     <div class="main-grid">
-        <ZoneList Zones="_zoneSummaries" OnZoneSelected="OnZoneClicked" ActiveZone="Live.HighlightZone" />
+        <ZoneList Zones="_zoneSummaries" OnZoneSelected="OnZoneClicked" ActiveZone="@Live.HighlightZone" />
         <div class="panel constellation-panel">
             <p class="panel-title">Anomaly constellation</p>
             <ConstellationView @ref="_constellationView" 
                                Devices="_devices" 
                                OnDeviceSelected="OnDeviceSelected"
-                               SelectedDeviceId="Live.SelectedDeviceId"
-                               HighlightZone="Live.HighlightZone"
+                               SelectedDeviceId="@Live.SelectedDeviceId"
+                               HighlightZone="@Live.HighlightZone"
                                HiddenSeverities="Live.HiddenSeverities"
                                OnSeverityToggled="Live.ToggleHiddenSeverity"
                                OnResetFilters="Live.ResetConstellationFilters" />
@@ -200,7 +200,12 @@
     }
     
     private void OnZoneClicked(string zoneName) =>
-        Live.HighlightZone = Live.HighlightZone == zoneName ? null : zoneName;
+        Live.HighlightZone = string.Equals(
+            Live.HighlightZone?.Trim(),
+            zoneName.Trim(),
+            StringComparison.OrdinalIgnoreCase)
+            ? null
+            : zoneName;
 
     private async Task OnDeviceRegistered(DeviceStatus newDevice)
     {

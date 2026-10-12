@@ -34,6 +34,26 @@ public class PipelineStructuresTests
     }
 
     [Fact]
+    public void SensorRegistry_RegisterDevice_CreatesUniqueDeviceIdAndStatus()
+    {
+        var registry = new SensorRegistry();
+
+        var outcome = registry.RegisterDevice(
+            "ZA-SUB1",
+            "02:00:00:00:00:99",
+            SensorCategory.Actuator,
+            "Hydroponic Bay, Valve 1");
+
+        Assert.True(outcome.IsValid);
+        Assert.NotNull(outcome.Device);
+        Assert.NotEqual("ZA-SUB1-DEV1", outcome.Device.DeviceId);
+        Assert.Equal(15, registry.DeviceNodes.Count);
+        Assert.Equal(15, registry.AllStatuses.Count);
+        Assert.Contains(registry.AllStatuses, status => status.DeviceId == outcome.Device.DeviceId);
+        Assert.Equal("Zone A", outcome.Device.ZoneName);
+    }
+
+    [Fact]
     public void DeviceStateStore_ResolvesByMac_CaseInsensitive()
     {
         var store = new DeviceStateStore();
