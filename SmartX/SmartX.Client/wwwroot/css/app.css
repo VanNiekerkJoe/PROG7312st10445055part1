@@ -1982,7 +1982,18 @@ a.topnav-link:hover {
 .cs-suggestion-history { border-left-color: var(--red); }
 .cs-suggestion-head { display: flex; justify-content: space-between; align-items: center; gap: 0.6rem; font-size: 0.82rem; }
 .cs-suggestion-detail { margin: 0.45rem 0 0.35rem; font-size: 0.78rem; line-height: 1.55; color: var(--text); }
+.cs-suggestion-group > .cs-suggestion-head { margin-bottom: 0.35rem; }
+.cs-suggestion-device { padding: 0.55rem 0; border-top: 1px solid var(--border); }
+.cs-suggestion-device-head { display: flex; align-items: center; gap: 0.55rem; font-size: 0.76rem; }
+.cs-suggestion-device-head > strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cs-suggestion-device-head .cs-confidence-label { margin-left: auto; }
+.cs-suggestion-summary { margin: 0.4rem 0; font-size: 0.74rem; line-height: 1.45; color: var(--text); }
 .cs-suggestion-status { margin: 0 0 0.65rem; font-size: 0.68rem; color: var(--muted); }
+.cs-suggestion-device .cs-suggestion-status { margin: 0.25rem 0; }
+.cs-suggestion-explanation { font-size: 0.71rem; color: var(--muted); }
+.cs-suggestion-explanation summary { cursor: pointer; width: fit-content; }
+.cs-suggestion-explanation summary:hover { color: var(--accent); }
+.cs-suggestion-explanation[open] summary { margin-bottom: 0.25rem; }
 .cs-suggestion-foot { display: flex; align-items: center; gap: 0.7rem; }
 .cs-confidence { flex: 1; height: 7px; border-radius: 999px; background: #070b10; border: 1px solid var(--border); overflow: hidden; }
 .cs-confidence-bar { height: 100%; border-radius: 999px; background: linear-gradient(90deg, var(--accent-dim), var(--accent)); transition: width 0.4s ease; }

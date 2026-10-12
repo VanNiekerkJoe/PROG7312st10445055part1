@@ -189,28 +189,59 @@
                 {
                     <div class="cs-empty-state">
                         <span class="cs-empty-ico">&#10024;</span>
-                        <p>No suggestions right now. They appear when a device misbehaves, or after you train the demo patterns.</p>
+                        <p>No suggestions right now. Search for a device or pattern, train the demo patterns, or wait for repeated alerts to surface inspection guidance.</p>
                     </div>
                 }
-                @foreach (var cached in _insights)
+                @foreach (var group in SuggestionGroups)
                 {
-                    var suggestion = cached.Suggestion;
-                    <div class="cs-suggestion cs-suggestion-@suggestion.Basis">
-                        <div class="cs-suggestion-head">
-                            <strong>@suggestion.Title</strong>
-                            <span class="cs-chip cs-basis-@suggestion.Basis">@suggestion.Basis</span>
-                        </div>
-                        <p class="cs-suggestion-detail">@suggestion.Detail</p>
-                        <p class="cs-suggestion-status">@SuggestionFreshness(cached.LastObservedAt)</p>
-                        <div class="cs-suggestion-foot">
-                            <div class="cs-confidence" title="Confidence"><div class="cs-confidence-bar" style="width:@Percent(suggestion.Confidence)"></div></div>
-                            <span class="cs-confidence-label">@Percent(suggestion.Confidence)</span>
-                            @if (suggestion.Command is not null && suggestion.DeviceId is not null)
+                    @if (group.Command is { } command)
+                    {
+                        <div class="cs-suggestion cs-suggestion-group">
+                            <div class="cs-suggestion-head">
+                                <strong>@command.Label() on @group.Suggestions.Count device@(group.Suggestions.Count == 1 ? "" : "s")</strong>
+                                <span class="cs-chip">@group.Suggestions.Count @(group.Suggestions.Count == 1 ? "action" : "actions")</span>
+                            </div>
+                            @foreach (var cached in group.Suggestions)
                             {
-                                <button class="btn btn-primary btn-sm" disabled="@_busy" @onclick="() => ApplyAsync(suggestion)">Apply</button>
+                                var suggestion = cached.Suggestion;
+                                <div class="cs-suggestion-device">
+                                    <div class="cs-suggestion-device-head">
+                                        <strong>@suggestion.DeviceId</strong>
+                                        <span class="cs-chip cs-basis-@suggestion.Basis">@suggestion.Basis</span>
+                                        <span class="cs-confidence-label">@Percent(suggestion.Confidence)</span>
+                                        <button class="btn btn-primary btn-sm" disabled="@_busy" @onclick="() => ApplyAsync(suggestion)">Apply</button>
+                                    </div>
+                                    <p class="cs-suggestion-status">@SuggestionFreshness(cached.LastObservedAt)</p>
+                                    <p class="cs-suggestion-summary">@SuggestionSummary(suggestion)</p>
+                                    <details class="cs-suggestion-explanation">
+                                        <summary>Why this is suggested</summary>
+                                        <p class="cs-suggestion-detail">@suggestion.Detail</p>
+                                    </details>
+                                </div>
                             }
                         </div>
-                    </div>
+                    }
+                    else if (group.Suggestions.Count > 0)
+                    {
+                        var cached = group.Suggestions[0];
+                        var suggestion = cached.Suggestion;
+                        <div class="cs-suggestion cs-suggestion-@suggestion.Basis">
+                            <div class="cs-suggestion-head">
+                                <strong>@suggestion.Title</strong>
+                                <span class="cs-chip cs-basis-@suggestion.Basis">@suggestion.Basis</span>
+                            </div>
+                            <p class="cs-suggestion-summary">@SuggestionSummary(suggestion)</p>
+                            <p class="cs-suggestion-status">@SuggestionFreshness(cached.LastObservedAt)</p>
+                            <details class="cs-suggestion-explanation">
+                                <summary>Read inspection guidance</summary>
+                                <p class="cs-suggestion-detail">@suggestion.Detail</p>
+                            </details>
+                            <div class="cs-suggestion-foot">
+                                <div class="cs-confidence" title="Confidence"><div class="cs-confidence-bar" style="width:@Percent(suggestion.Confidence)"></div></div>
+                                <span class="cs-confidence-label">@Percent(suggestion.Confidence)</span>
+                            </div>
+                        </div>
+                    }
                 }
             </section>
         </div>
@@ -284,6 +315,11 @@
     private Timer? _timer;
 
     private DeviceStatus? Selected => Live.Find(Live.SelectedDeviceId);
+    private IEnumerable<SuggestionGroup> SuggestionGroups => _insights
+        .GroupBy(entry => entry.Suggestion.Command is { } command
+            ? $"command:{command}"
+            : $"inspection:{entry.Suggestion.Id}", StringComparer.Ordinal)
+        .Select(group => new SuggestionGroup(group.First().Suggestion.Command, group.ToList()));
 
     protected override void OnInitialized()
     {
@@ -531,6 +567,49 @@
         return $"Last detected {FormatDuration(age)} ago · kept for {FormatDuration(remaining)} more";
     }
 
+    private static string SuggestionSummary(SuggestedAction suggestion)
+    {
+        if (suggestion.Id.StartsWith("learned:", StringComparison.Ordinal))
+        {
+            const string evidenceMarker = "Recency-weighted operator evidence for ";
+            const string observationMarker = " effective observations after similar ";
+            var evidenceStart = suggestion.Detail.IndexOf(evidenceMarker, StringComparison.Ordinal);
+            var countStart = evidenceStart < 0 ? -1 : suggestion.Detail.IndexOf(" is ", evidenceStart, StringComparison.Ordinal);
+            var contextStart = countStart < 0 ? -1 : suggestion.Detail.IndexOf(observationMarker, countStart, StringComparison.Ordinal);
+            var contextEnd = contextStart < 0 ? -1 : suggestion.Detail.IndexOf(" alerts", contextStart, StringComparison.Ordinal);
+            if (countStart >= 0 && contextStart > countStart && contextEnd > contextStart)
+            {
+                var count = suggestion.Detail[(countStart + 4)..contextStart].Trim();
+                var context = suggestion.Detail[(contextStart + observationMarker.Length)..contextEnd];
+                return $"Operators chose this in {count} {context} alerts{ProvenanceSummary(suggestion.Detail)}.";
+            }
+        }
+
+        if (suggestion.Id.StartsWith("search:", StringComparison.Ordinal))
+        {
+            return $"Learned from operator actions after matching searches{ProvenanceSummary(suggestion.Detail)}.";
+        }
+
+        if (suggestion.Id.StartsWith("disconnect:", StringComparison.Ordinal))
+        {
+            return "Telemetry has stopped; inspect connectivity before attempting a remote command.";
+        }
+
+        if (suggestion.Basis == "history")
+        {
+            return $"Repeated recent alerts warrant inspection{ProvenanceSummary(suggestion.Detail)}.";
+        }
+
+        return "Triggered by the device's current telemetry; review the details before applying.";
+    }
+
+    private static string ProvenanceSummary(string detail) =>
+        detail.Contains("Part of this evidence is seeded demo data", StringComparison.OrdinalIgnoreCase)
+            ? " · partly seeded demo data"
+            : detail.Contains("seeded demo data", StringComparison.OrdinalIgnoreCase)
+                ? " · seeded demo data"
+                : "";
+
     private static string FormatDuration(TimeSpan duration)
     {
         var totalSeconds = Math.Max(1, (int)Math.Ceiling(duration.TotalSeconds));
@@ -540,6 +619,7 @@
     }
 
     private sealed record CachedSuggestion(SuggestedAction Suggestion, DateTimeOffset LastObservedAt);
+    private sealed record SuggestionGroup(CommandType? Command, List<CachedSuggestion> Suggestions);
 
     private bool IsCommandActive(string deviceId, CommandType command)
     {

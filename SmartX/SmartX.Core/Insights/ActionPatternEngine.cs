@@ -204,6 +204,10 @@ public sealed class ActionPatternEngine
     {
         var all = statuses.ToList();
         var knownDevices = all.Select(status => status.DeviceId).ToHashSet(StringComparer.Ordinal);
+        var disconnectedDevices = all
+            .Where(status => status.Severity == AnomalySeverity.Disconnected)
+            .Select(status => status.DeviceId)
+            .ToHashSet(StringComparer.Ordinal);
         var suggestions = new Dictionary<string, SuggestedAction>(StringComparer.Ordinal);
         var problem = all
             .Where(s => s.Severity is AnomalySeverity.Anomalous or AnomalySeverity.Disconnected)
@@ -216,7 +220,7 @@ public sealed class ActionPatternEngine
             PruneAll(now);
 
             // 1. Learned: what the operator usually does after this kind of alert.
-            foreach (var device in problem)
+            foreach (var device in problem.Where(s => s.Severity == AnomalySeverity.Anomalous))
             {
                 var context = AlertContext(device.Category, device.Severity);
                 if (!_transitions.TryGetValue(context, out var followUps))
@@ -272,6 +276,7 @@ public sealed class ActionPatternEngine
                         var parts = followUp.Key.Split('|');
                         if (parts.Length != 2
                             || !knownDevices.Contains(parts[0])
+                            || disconnectedDevices.Contains(parts[0])
                             || !Enum.TryParse<CommandType>(parts[1], out var command))
                         {
                             continue;
@@ -305,7 +310,7 @@ public sealed class ActionPatternEngine
                     continue;
                 }
 
-                var rule = RuleFor(device);
+                var rule = RuleFor(device, now);
                 if (rule is not null)
                 {
                     Offer(suggestions, rule);
@@ -338,24 +343,60 @@ public sealed class ActionPatternEngine
             }
         }
 
-        return suggestions.Values
+        var ranked = suggestions.Values
             .OrderByDescending(s => s.Confidence)
             .ThenBy(s => BasisRank(s.Basis))
             .ThenBy(s => s.DeviceId, StringComparer.Ordinal)
             .ThenBy(s => s.Title, StringComparer.Ordinal)
-            .Take(max)
             .ToList();
+
+        var selected = new List<SuggestedAction>();
+        var selectedIds = new HashSet<string>(StringComparer.Ordinal);
+        AddFirst(suggestion => suggestion.Id.StartsWith("search:", StringComparison.Ordinal));
+        AddFirst(suggestion => suggestion.Basis == "history" || suggestion.Id.StartsWith("disconnect:", StringComparison.Ordinal));
+        AddFirst(suggestion => suggestion.Id.StartsWith("learned:", StringComparison.Ordinal));
+        AddFirst(suggestion => suggestion.Basis == "rule");
+        foreach (var suggestion in ranked)
+        {
+            Add(suggestion);
+        }
+
+        return selected.Take(Math.Max(0, max)).ToList();
+
+        void AddFirst(Func<SuggestedAction, bool> predicate)
+        {
+            var candidate = ranked.FirstOrDefault(suggestion =>
+                !selectedIds.Contains(suggestion.Id) && predicate(suggestion));
+            if (candidate is not null)
+            {
+                Add(candidate);
+            }
+        }
+
+        void Add(SuggestedAction suggestion)
+        {
+            if (selectedIds.Add(suggestion.Id))
+            {
+                selected.Add(suggestion);
+            }
+        }
     }
 
-    private static SuggestedAction? RuleFor(DeviceStatus device)
+    private static SuggestedAction? RuleFor(DeviceStatus device, DateTimeOffset now)
     {
         if (device.Severity == AnomalySeverity.Disconnected)
         {
-            return MakeRule(
-                device,
-                CommandType.RelayOn,
-                $"{ReadingContext(device)} No recent telemetry can indicate a power, network, gateway-range, or device fault. Relay ON may restore power, but can energise connected equipment; confirm it is safe to do so, then check the device supply and connection before applying.",
-                0.4);
+            var age = now > device.LastSeen ? now - device.LastSeen : TimeSpan.Zero;
+            var ageText = DescribeAge(age);
+            var lastSeen = device.LastSeen.ToLocalTime().ToString("HH:mm:ss", System.Globalization.CultureInfo.InvariantCulture);
+            return new SuggestedAction(
+                $"disconnect:{device.DeviceId}",
+                $"Inspect {device.DeviceId}: no data for {ageText}",
+                $"No telemetry has arrived for {ageText} (last received at {lastSeen}). Check the device's power, network, and gateway connection, then confirm it resumes reporting. A disconnected device may not be able to receive a remote command.",
+                device.DeviceId,
+                null,
+                0.95,
+                "rule");
         }
 
         if (device.Severity != AnomalySeverity.Anomalous)
@@ -612,6 +653,12 @@ public sealed class ActionPatternEngine
         span.TotalDays >= 1 ? $"{span.TotalDays:0.#} days" :
         span.TotalHours >= 1 ? $"{span.TotalHours:0.#} hours" :
         $"{span.TotalMinutes:0.#} minutes";
+
+    private static string DescribeAge(TimeSpan age) =>
+        age.TotalDays >= 1 ? $"{Math.Floor(age.TotalDays)} {(Math.Floor(age.TotalDays) == 1 ? "day" : "days")}" :
+        age.TotalHours >= 1 ? $"{Math.Floor(age.TotalHours)} {(Math.Floor(age.TotalHours) == 1 ? "hour" : "hours")}" :
+        age.TotalMinutes >= 1 ? $"{Math.Floor(age.TotalMinutes)} {(Math.Floor(age.TotalMinutes) == 1 ? "minute" : "minutes")}" :
+        $"{Math.Max(0, (int)Math.Floor(age.TotalSeconds))} {(Math.Floor(age.TotalSeconds) == 1 ? "second" : "seconds")}";
 
     private static string FormatWeight(double weight) =>
         weight.ToString("0.0", System.Globalization.CultureInfo.InvariantCulture);

@@ -87,6 +87,35 @@ public class ActionPatternEngineTests
     }
 
     [Fact]
+    public void DisconnectedDeviceGetsInspectionGuidanceInsteadOfRemoteCommand()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var engine = new ActionPatternEngine(new ManualTimeProvider(now));
+        for (var i = 0; i < 3; i++)
+        {
+            var at = now.AddMinutes(-5 + i * 2);
+            engine.ObserveAlert("D1", SensorCategory.Power, AnomalySeverity.Disconnected, at);
+            engine.ObserveCommand("D1", CommandType.RelayOn, at.AddSeconds(5));
+            engine.ObserveSearch("relay", at);
+            engine.ObserveCommand("D1", CommandType.RelayOn, at.AddSeconds(10));
+        }
+
+        var disconnected = Status("D1", SensorCategory.Power, AnomalySeverity.Disconnected) with
+        {
+            LastSeen = now.AddSeconds(-90)
+        };
+
+        var suggestions = engine.Suggest("relay", [disconnected]);
+
+        Assert.Contains(suggestions, suggestion => suggestion.Id == "disconnect:D1");
+        Assert.All(suggestions, suggestion => Assert.Null(suggestion.Command));
+        var inspection = Assert.Single(suggestions, suggestion => suggestion.Id == "disconnect:D1");
+        Assert.Equal("rule", inspection.Basis);
+        Assert.Contains("no data for 1 minute", inspection.Title);
+        Assert.Contains("may not be able to receive a remote command", inspection.Detail);
+    }
+
+    [Fact]
     public void SearchPattern_SurfacesBeforeOperatorCommands()
     {
         var t = DateTimeOffset.UtcNow;
@@ -149,6 +178,31 @@ public class ActionPatternEngineTests
         var suggestions = engine.Suggest(null, [Status("FLAKY", SensorCategory.Power, AnomalySeverity.Healthy)]);
 
         Assert.Contains(suggestions, s => s.Basis == "history" && s.DeviceId == "FLAKY");
+    }
+
+    [Fact]
+    public void SuggestionsPrioritizeSearchWatchListAndAlertLearningForVariety()
+    {
+        var t = DateTimeOffset.UtcNow;
+        var engine = new ActionPatternEngine(new ManualTimeProvider(t.AddMinutes(10)));
+
+        for (var i = 0; i < 3; i++)
+        {
+            var at = t.AddMinutes(i * 2);
+            engine.ObserveAlert("FLAKY", SensorCategory.Power, AnomalySeverity.Anomalous, at);
+            engine.ObserveCommand("FLAKY", CommandType.RelayOff, at.AddSeconds(5));
+            engine.ObserveSearch("relay", at);
+            engine.ObserveCommand("FLAKY", CommandType.RelayOff, at.AddSeconds(10));
+        }
+
+        var suggestions = engine.Suggest(
+            "relay",
+            [Status("FLAKY", SensorCategory.Power, AnomalySeverity.Anomalous)],
+            max: 3);
+
+        Assert.Contains(suggestions, suggestion => suggestion.Id.StartsWith("search:", StringComparison.Ordinal));
+        Assert.Contains(suggestions, suggestion => suggestion.Id.StartsWith("learned:", StringComparison.Ordinal));
+        Assert.Contains(suggestions, suggestion => suggestion.Basis == "history");
     }
 
     [Fact]
