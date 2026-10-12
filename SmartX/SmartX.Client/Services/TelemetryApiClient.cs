@@ -1,4 +1,5 @@
 using System.Net.Http.Json;
+using System.Text.Json;
 using SmartX.Core.Telemetry;
 
 namespace SmartX.Client.Services;
@@ -57,7 +58,34 @@ public sealed class TelemetryApiClient
     {
         var request = new RegisterDeviceRequest(parentSubZoneId, macAddress, category, locationDescription);
         var response = await _http.PostAsJsonAsync("/api/sensors/register", request, ct);
-        return await response.Content.ReadFromJsonAsync<DeviceRegistrationOutcomeDto>(cancellationToken: ct);
+        var body = await response.Content.ReadAsStringAsync(ct);
+        DeviceRegistrationOutcomeDto? result;
+        try
+        {
+            result = JsonSerializer.Deserialize<DeviceRegistrationOutcomeDto>(
+                body,
+                new JsonSerializerOptions(JsonSerializerDefaults.Web));
+        }
+        catch (JsonException ex)
+        {
+            throw new HttpRequestException(
+                $"Device registration returned HTTP {(int)response.StatusCode}, but its response was not valid registration data.",
+                ex,
+                response.StatusCode);
+        }
+
+        if (!response.IsSuccessStatusCode && (result is null || result.IsValid))
+        {
+            var detail = string.IsNullOrWhiteSpace(body)
+                ? response.ReasonPhrase
+                : body.Length > 300 ? body[..300] : body;
+            throw new HttpRequestException(
+                $"Device registration API returned HTTP {(int)response.StatusCode}: {detail}",
+                null,
+                response.StatusCode);
+        }
+
+        return result;
     }
 
     /// <summary>Removes a single device from the server-side registry (tree + all indexes).</summary>

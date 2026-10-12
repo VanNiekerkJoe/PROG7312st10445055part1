@@ -20,7 +20,7 @@
                 <div class="auth-error" role="alert">@_error</div>
             }
 
-            <button class="auth-submit" type="submit" disabled="_busy">
+            <button class="auth-submit" type="submit" disabled="@_busy">
                 @(_busy ? "Connecting..." : _createAccount ? "Create account" : "Sign in securely")
             </button>
         </EditForm>

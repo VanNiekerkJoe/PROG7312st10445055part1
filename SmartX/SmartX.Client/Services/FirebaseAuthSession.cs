@@ -224,11 +224,19 @@ public sealed class FirebaseAuthSession(HttpClient http, IJSRuntime js, string a
     private sealed record RefreshResponse(string? IdToken, string? AccessToken, string? RefreshToken, string? ExpiresIn);
 }
 
-public sealed class FirebaseBearerHandler(FirebaseAuthSession session) : DelegatingHandler
+public sealed class FirebaseBearerHandler : DelegatingHandler
 {
+    private readonly FirebaseAuthSession _session;
+
+    public FirebaseBearerHandler(FirebaseAuthSession session)
+    {
+        _session = session;
+        InnerHandler = new HttpClientHandler();
+    }
+
     protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
     {
-        var token = await session.GetIdTokenAsync();
+        var token = await _session.GetIdTokenAsync();
         if (!string.IsNullOrWhiteSpace(token))
         {
             request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);

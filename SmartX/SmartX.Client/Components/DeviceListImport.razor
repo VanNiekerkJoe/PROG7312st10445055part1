@@ -138,7 +138,7 @@
                 catch (Exception ex)
                 {
                     Console.Error.WriteLine($"Device import failed on line {lineNumber}: {ex.Message}");
-                    _errors.Add(new ImportError(lineNumber, "The API could not register this device."));
+                    _errors.Add(new ImportError(lineNumber, $"Registration request failed: {ex.Message}"));
                 }
             }
         }
