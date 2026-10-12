@@ -28,6 +28,7 @@ public sealed class LiveStateService : IDisposable
     private readonly Dictionary<string, DeviceStatus> _statuses = new();
     private readonly List<DeviceCommand> _commands = [];
     private readonly List<FeedItem> _feed = [];
+    private readonly HashSet<string> _appliedSuggestionIds = new(StringComparer.Ordinal);
     private readonly SemaphoreSlim _startLock = new(1, 1);
     private readonly Timer _flushTimer;
 
@@ -96,6 +97,12 @@ public sealed class LiveStateService : IDisposable
     public DateTimeOffset LastPriorityReceivedAt { get; private set; } = DateTimeOffset.MinValue;
     public int LastPriorityBacklog { get; private set; }
     public int UndoDepth { get; private set; }
+
+    public bool IsSuggestionApplied(string suggestionId) =>
+        _appliedSuggestionIds.Contains(suggestionId);
+
+    public void MarkSuggestionApplied(string suggestionId) =>
+        _appliedSuggestionIds.Add(suggestionId);
 
     public bool IsConnected =>
         _telemetryHub.State == Microsoft.AspNetCore.SignalR.Client.HubConnectionState.Connected
@@ -208,6 +215,7 @@ public sealed class LiveStateService : IDisposable
     private void OnAllDevicesCleared()
     {
         _statuses.Clear();
+        _appliedSuggestionIds.Clear();
         SelectedDeviceId = null;
         MarkDirty();
     }

@@ -306,7 +306,9 @@
         }
 
         await Live.StartAsync();
-        var currentInsights = await CommandApi.GetInsightsAsync(Live.SearchTerm);
+        var currentInsights = (await CommandApi.GetInsightsAsync(Live.SearchTerm))
+            .Where(suggestion => !Live.IsSuggestionApplied(suggestion.Id))
+            .ToList();
         var now = DateTimeOffset.UtcNow;
         var currentIds = new HashSet<string>(StringComparer.Ordinal);
         foreach (var suggestion in currentInsights)
@@ -324,6 +326,7 @@
         }
 
         var retained = _cachedInsights.Values
+            .Where(entry => !Live.IsSuggestionApplied(entry.Suggestion.Id))
             .OrderByDescending(entry => currentIds.Contains(entry.Suggestion.Id))
             .ThenByDescending(entry => entry.LastObservedAt)
             .Take(MaxVisibleSuggestions)
@@ -436,6 +439,12 @@
         await RunBusyAsync(async () =>
         {
             var result = await CommandApi.IssueCommandAsync(deviceId, command, fromSuggestion: true);
+            if (result.Ok)
+            {
+                Live.MarkSuggestionApplied(suggestion.Id);
+                _cachedInsights.Remove(suggestion.Id);
+                _insights.RemoveAll(entry => entry.Suggestion.Id == suggestion.Id);
+            }
             Notify(result.Message, result.Ok);
         });
     }
