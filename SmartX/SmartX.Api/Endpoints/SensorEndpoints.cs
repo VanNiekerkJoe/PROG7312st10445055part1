@@ -27,6 +27,7 @@ public static class SensorEndpoints
     public static void MapSensorEndpoints(this WebApplication app)
     {
         var group = app.MapGroup("/api/sensors").WithTags("Sensors");
+        group.RequireAuthorization();
 
         group.MapGet("/", (SensorRegistry registry, DeviceStateStore devices) =>
         {

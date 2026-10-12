@@ -1,0 +1,87 @@
+@inject FirebaseAuthSession Auth
+
+<main class="auth-shell">
+    <section class="auth-card">
+        <div class="auth-brand"><span class="logo-mark">◈</span><span>SMART-X / GATEWAY</span></div>
+        <div class="auth-eyebrow">SECURE OPERATIONS CONSOLE</div>
+        <h1>@(_createAccount ? "Create your operator account" : "Welcome back")</h1>
+        <p class="auth-intro">Sign in to monitor your sensor network and manage device operations.</p>
+
+        <EditForm Model="_form" OnSubmit="@(async _ => await SubmitAsync())">
+            <label for="auth-email">Email address</label>
+            <InputText id="auth-email" class="auth-input" @bind-Value="_form.Email" type="email" autocomplete="email" />
+
+            <label for="auth-password">Password</label>
+            <InputText id="auth-password" class="auth-input" @bind-Value="_form.Password" type="password"
+                       autocomplete="@(_createAccount ? "new-password" : "current-password")" />
+
+            @if (!string.IsNullOrWhiteSpace(_error))
+            {
+                <div class="auth-error" role="alert">@_error</div>
+            }
+
+            <button class="auth-submit" type="submit" disabled="_busy">
+                @(_busy ? "Connecting..." : _createAccount ? "Create account" : "Sign in securely")
+            </button>
+        </EditForm>
+
+        <button class="auth-switch" type="button" @onclick="ToggleMode">
+            @(_createAccount ? "Already have an account? Sign in" : "New operator? Create an account")
+        </button>
+        <div class="auth-footnote"><span class="status-dot"></span> Protected by Firebase Authentication</div>
+    </section>
+    <aside class="auth-visual">
+        <div class="auth-visual-grid"></div>
+        <svg class="auth-network" viewBox="0 0 520 420" role="img" aria-label="Connected sensor network illustration">
+            <circle cx="260" cy="210" r="74" class="network-orbit orbit-large" />
+            <circle cx="260" cy="210" r="126" class="network-orbit orbit-small" />
+            <path d="M260 210 111 113M260 210 409 113M260 210 123 312M260 210 397 312M260 210 260 48"
+                  class="network-link" />
+            <circle cx="260" cy="210" r="25" class="network-core" />
+            <circle cx="111" cy="113" r="10" class="network-node" />
+            <circle cx="409" cy="113" r="10" class="network-node" />
+            <circle cx="123" cy="312" r="10" class="network-node" />
+            <circle cx="397" cy="312" r="10" class="network-node" />
+            <circle cx="260" cy="48" r="10" class="network-node" />
+            <circle cx="260" cy="210" r="5" class="network-core-light" />
+        </svg>
+        <div class="auth-visual-caption">
+            <span>LIVE NETWORK INTELLIGENCE</span>
+            <p>One clear view of every signal, alert, and action across your deployment.</p>
+        </div>
+    </aside>
+</main>
+
+@code {
+    private readonly SignInForm _form = new();
+    private bool _createAccount;
+    private bool _busy;
+    private string? _error;
+
+    private void ToggleMode()
+    {
+        _createAccount = !_createAccount;
+        _error = null;
+    }
+
+    private async Task SubmitAsync()
+    {
+        _busy = true;
+        _error = null;
+        try
+        {
+            var result = await Auth.SignInAsync(_form.Email, _form.Password, _createAccount);
+            _error = result.Error;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private sealed class SignInForm
+    {
+        public string Email { get; set; } = "";
+        public string Password { get; set; } = "";
+    }
+}

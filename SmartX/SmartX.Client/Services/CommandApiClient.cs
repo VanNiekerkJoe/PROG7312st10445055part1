@@ -14,9 +14,13 @@ public sealed class CommandApiClient
 {
     private readonly HttpClient _http;
 
-    public CommandApiClient(string baseAddress)
+    public CommandApiClient(string baseAddress, FirebaseAuthSession auth)
     {
-        _http = new HttpClient { BaseAddress = new Uri(baseAddress), Timeout = TimeSpan.FromSeconds(30) };
+        _http = new HttpClient(new FirebaseBearerHandler(auth))
+        {
+            BaseAddress = new Uri(baseAddress),
+            Timeout = TimeSpan.FromSeconds(30)
+        };
     }
 
     public async Task<CommandLogResponse?> GetCommandLogAsync(CancellationToken ct = default)

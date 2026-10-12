@@ -12,6 +12,7 @@ public static class TelemetryEndpoints
     public static void MapTelemetryEndpoints(this WebApplication app)
     {
         var group = app.MapGroup("/api/telemetry").WithTags("Telemetry");
+        group.RequireAuthorization();
 
         // The front door for devices. Real hardware (or SmartX.DeviceSimulator)
         // POSTs a reading here; the gateway classifies it, drops it into the

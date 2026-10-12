@@ -14,10 +14,13 @@ public sealed class TelemetryApiClient
 {
     private readonly HttpClient _http;
 
-    public TelemetryApiClient(string baseAddress)
+    public TelemetryApiClient(string baseAddress, FirebaseAuthSession auth)
     {
-        _http = new HttpClient { BaseAddress = new Uri(baseAddress) };
-        _http.Timeout = TimeSpan.FromSeconds(30);
+        _http = new HttpClient(new FirebaseBearerHandler(auth))
+        {
+            BaseAddress = new Uri(baseAddress),
+            Timeout = TimeSpan.FromSeconds(30)
+        };
     }
 
     public async Task<List<DeviceStatus>> GetAllStatusesAsync(CancellationToken ct = default)

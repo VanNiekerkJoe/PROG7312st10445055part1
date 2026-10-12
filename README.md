@@ -147,6 +147,31 @@ Open the URL the client prints (default `https://localhost:5173`).
 
 **Simulator keys:** `S` spikes a random sensor, `X` silences a random device for 30 s, `Q` quits.
 
+### Firebase authentication setup
+
+The dashboard uses Firebase email/password authentication. All sensor, telemetry, command, insight, and SignalR hub operations require a valid Firebase ID token. The Firebase Web API key is supplied to the client by the API's anonymous configuration endpoint; do not commit it to source control.
+
+Configure the API's local user-secrets store (from the repository root):
+
+```
+dotnet user-secrets set "Firebase:ApiKey" "<your-firebase-web-api-key>" --project SmartX/SmartX.Api/SmartX.Api.csproj
+dotnet user-secrets set "Firebase:ProjectId" "<your-firebase-project-id>" --project SmartX/SmartX.Api/SmartX.Api.csproj
+```
+
+In Firebase Console, enable the **Email/Password** sign-in provider. The sign-in screen can create an account or sign in an existing operator. The API validates token signature, issuer, audience, and expiry against the configured project. The root health endpoint and `/api/auth/config` remain public; dashboard APIs and both hubs are protected.
+
+The device simulator also authenticates. Set `SMARTX_FIREBASE_EMAIL` and `SMARTX_FIREBASE_PASSWORD` in its process environment to a Firebase operator account before starting it. It obtains and refreshes its ID token automatically. Do not put account passwords in source files.
+
+### Importing a device list
+
+On **Sensor ingestion**, choose **Import .txt device list** and select a UTF-8 text file containing one tab-separated device per line:
+
+```
+subZoneId<TAB>MAC address<TAB>category<TAB>location description
+```
+
+For example, a row may contain `SUB-ZONE-1`, `24:6F:28:AA:BB:CC`, `Environmental`, and `North greenhouse`, separated by literal tab characters. The header row is optional. Categories are `Environmental`, `Power`, and `Actuator`. Files are limited to 1 MB and 500 device rows. Valid rows are registered independently, successful devices appear immediately in the constellation, and failed rows are reported with their line numbers.
+
 ---
 
 ## 5. Part 2 feature tour

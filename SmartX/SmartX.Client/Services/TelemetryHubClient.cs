@@ -19,10 +19,10 @@ public sealed class TelemetryHubClient : IAsyncDisposable
     public event Action? ConnectionStateChanged;
     public event Action? Reconnected;
 
-    public TelemetryHubClient(string hubUrl)
+    public TelemetryHubClient(string hubUrl, FirebaseAuthSession auth)
     {
         _connection = new HubConnectionBuilder()
-            .WithUrl(hubUrl)
+            .WithUrl(hubUrl, options => options.AccessTokenProvider = auth.GetIdTokenAsync)
             .WithAutomaticReconnect(new SignalRReconnectPolicy())
             .Build();
 
@@ -64,6 +64,13 @@ public sealed class TelemetryHubClient : IAsyncDisposable
     }
 
     public HubConnectionState State => _connection.State;
+
+    public async Task StopAsync()
+    {
+        await _connection.StopAsync();
+        _started = false;
+        ConnectionStateChanged?.Invoke();
+    }
 
     public async ValueTask DisposeAsync()
     {

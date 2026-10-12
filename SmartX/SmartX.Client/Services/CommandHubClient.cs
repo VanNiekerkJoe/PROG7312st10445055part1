@@ -18,10 +18,10 @@ public sealed class CommandHubClient : IAsyncDisposable
     public event Action? ConnectionStateChanged;
     public event Action? Reconnected;
 
-    public CommandHubClient(string hubUrl)
+    public CommandHubClient(string hubUrl, FirebaseAuthSession auth)
     {
         _connection = new HubConnectionBuilder()
-            .WithUrl(hubUrl)
+            .WithUrl(hubUrl, options => options.AccessTokenProvider = auth.GetIdTokenAsync)
             .WithAutomaticReconnect(new SignalRReconnectPolicy())
             .Build();
 
@@ -60,6 +60,13 @@ public sealed class CommandHubClient : IAsyncDisposable
         {
             _startLock.Release();
         }
+    }
+
+    public async Task StopAsync()
+    {
+        await _connection.StopAsync();
+        _started = false;
+        ConnectionStateChanged?.Invoke();
     }
 
     public async ValueTask DisposeAsync()

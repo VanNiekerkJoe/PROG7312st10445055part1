@@ -1,17 +1,77 @@
 @inherits LayoutComponentBase
 @using SmartX.Client.Components
 @inject LiveStateService Live
+@inject FirebaseAuthSession Auth
+@implements IDisposable
 
-<NavMenu />
+@if (!_authReady)
+{
+    <div class="loading-screen">Restoring secure session</div>
+}
+else if (Auth.IsAuthenticated)
+{
+    <NavMenu />
 
-<main class="smartx-shell">
-    @Body
-</main>
+    <main class="smartx-shell">
+        @Body
+    </main>
+}
+else
+{
+    <FirebaseSignIn />
+}
 
 @code {
-    protected override void OnInitialized()
+    private bool _authReady;
+    private bool _liveStarted;
+
+    protected override void OnInitialized() => Auth.Changed += OnAuthChanged;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        // Start the app-wide live store once; it keeps running across page navigation.
-        _ = Live.StartAsync();
+        if (!firstRender)
+        {
+            return;
+        }
+
+        await Auth.RestoreAsync();
+        _authReady = true;
+        if (Auth.IsAuthenticated)
+        {
+            await StartLiveAsync();
+        }
+
+        StateHasChanged();
     }
+
+    private async Task StartLiveAsync()
+    {
+        if (_liveStarted)
+        {
+            return;
+        }
+
+        await Live.StartAsync();
+        _liveStarted = true;
+    }
+
+    private void OnAuthChanged()
+    {
+        _ = InvokeAsync(async () =>
+        {
+            if (Auth.IsAuthenticated)
+            {
+                await StartLiveAsync();
+            }
+            else if (_liveStarted)
+            {
+                await Live.StopAsync();
+                _liveStarted = false;
+            }
+
+            StateHasChanged();
+        });
+    }
+
+    public void Dispose() => Auth.Changed -= OnAuthChanged;
 }

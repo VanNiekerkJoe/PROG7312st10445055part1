@@ -10,6 +10,9 @@
         <button class="registration-toggle-btn" @onclick="() => _showRegistrationForm = !_showRegistrationForm">
             + Register sensor
         </button>
+        <button class="test-data-btn" @onclick="() => _showDeviceImport = !_showDeviceImport">
+            Import .txt device list
+        </button>
         @if (_seederRunning)
         {
             <button class="test-data-btn" @onclick="StopSeeder" style="color: var(--red); border-color: var(--red);" disabled="@_busy">
@@ -40,6 +43,11 @@
         <DeviceRegistrationForm ApiClient="Api" 
                                 OnClose="() => _showRegistrationForm = false" 
                                 OnRegistered="OnDeviceRegistered" />
+    }
+    @if (_showDeviceImport)
+    {
+        <DeviceListImport OnClose="() => _showDeviceImport = false"
+                          OnRegistered="OnDeviceRegistered" />
     }
     @if (Live.HighlightZone is not null)
     {
@@ -79,6 +87,7 @@
     private List<ZoneList.ZoneSummary> _zoneSummaries = [];
     private DeviceStatus? _selected;
     private bool _showRegistrationForm;
+    private bool _showDeviceImport;
     private int _activeSensors;
     private int _anomalyCount;
     private int _disconnectedCount;

@@ -170,6 +170,25 @@ public sealed class LiveStateService : IDisposable
         }
     }
 
+    public async Task StopAsync()
+    {
+        await _startLock.WaitAsync();
+        try
+        {
+            UnsubscribeAll();
+            await _telemetryHub.StopAsync();
+            await _commandHub.StopAsync();
+            _started = false;
+            _statuses.Clear();
+            _commands.Clear();
+            MarkDirty();
+        }
+        finally
+        {
+            _startLock.Release();
+        }
+    }
+
     public async Task ReloadAsync()
     {
         var statuses = await _telemetryApi.GetAllStatusesAsync();

@@ -10,13 +10,25 @@ const string apiBaseAddress = "https://localhost:5001";
 
 builder.RootComponents.Add<SmartX.Client.App>("#app");
 
-builder.Services.AddSingleton(_ => new TelemetryApiClient(apiBaseAddress));
-builder.Services.AddSingleton(_ => new TelemetryHubClient($"{apiBaseAddress}/hubs/telemetry"));
+builder.Services.AddSingleton(sp => new FirebaseAuthSession(
+    new HttpClient(),
+    sp.GetRequiredService<Microsoft.JSInterop.IJSRuntime>(),
+    apiBaseAddress));
+builder.Services.AddSingleton(sp => new TelemetryApiClient(
+    apiBaseAddress,
+    sp.GetRequiredService<FirebaseAuthSession>()));
+builder.Services.AddSingleton(sp => new TelemetryHubClient(
+    $"{apiBaseAddress}/hubs/telemetry",
+    sp.GetRequiredService<FirebaseAuthSession>()));
 
 // Part 2: command stream clients, plus one app-lifetime store that keeps
 // device/command/feed state alive while the user navigates between pages.
-builder.Services.AddSingleton(_ => new CommandApiClient(apiBaseAddress));
-builder.Services.AddSingleton(_ => new CommandHubClient($"{apiBaseAddress}/hubs/commands"));
+builder.Services.AddSingleton(sp => new CommandApiClient(
+    apiBaseAddress,
+    sp.GetRequiredService<FirebaseAuthSession>()));
+builder.Services.AddSingleton(sp => new CommandHubClient(
+    $"{apiBaseAddress}/hubs/commands",
+    sp.GetRequiredService<FirebaseAuthSession>()));
 builder.Services.AddSingleton<LiveStateService>();
 
 await builder.Build().RunAsync();

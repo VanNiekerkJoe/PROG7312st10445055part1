@@ -1,56 +1,101 @@
 @page "/"
 
-<div class="landing">
-    <header class="landing-header">
-        <span class="logo-mark">◈</span>
-        <h1>Smart-X Gateway</h1>
-        <p>Hybrid IoT mesh ecosystem: Portfolio of Evidence, Part 2</p>
-    </header>
+<div class="landing landing-product">
+    <nav class="landing-nav">
+        <a class="landing-wordmark" href="/"><span class="logo-mark">◈</span> SMART-X</a>
+        <span class="landing-nav-label"><span class="status-dot"></span> GATEWAY ONLINE</span>
+    </nav>
 
-    <div class="pillar-grid">
-        <a class="pillar-card pillar-active" href="/ingestion">
-            <span class="pillar-icon">
-                <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                    <circle cx="12" cy="12" r="2.4" fill="currentColor" />
-                    <circle cx="5" cy="6" r="1.6" fill="currentColor" opacity="0.7" />
-                    <circle cx="19" cy="6" r="1.6" fill="currentColor" opacity="0.7" />
-                    <circle cx="5" cy="18" r="1.6" fill="currentColor" opacity="0.7" />
-                    <circle cx="19" cy="18" r="1.6" fill="currentColor" opacity="0.7" />
-                    <line x1="12" y1="12" x2="5" y2="6" stroke="currentColor" stroke-width="1" opacity="0.5" />
-                    <line x1="12" y1="12" x2="19" y2="6" stroke="currentColor" stroke-width="1" opacity="0.5" />
-                    <line x1="12" y1="12" x2="5" y2="18" stroke="currentColor" stroke-width="1" opacity="0.5" />
-                    <line x1="12" y1="12" x2="19" y2="18" stroke="currentColor" stroke-width="1" opacity="0.5" />
-                </svg>
-            </span>
-            <h2>Sensor Data Ingestion &amp; Telemetry</h2>
-            <p>Live ingestion, validation, and the Anomaly Constellation dashboard.</p>
-            <span class="pillar-cta">Open dashboard →</span>
-        </a>
-
-        <a class="pillar-card pillar-active" href="/commands">
-            <span class="pillar-icon">
-                <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                    <path d="M4 5h16v10H9l-4 4V5z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" />
-                </svg>
-            </span>
-            <h2>Real-Time Command Stream &amp; History</h2>
-            <p>Live telemetry queue, manual overrides with undo, and suggested actions.</p>
-            <span class="pillar-cta">Open command stream →</span>
-        </a>
-
-        <div class="pillar-card pillar-disabled">
-            <span class="pillar-icon">
-                <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                    <circle cx="12" cy="5" r="1.8" stroke="currentColor" stroke-width="1.4" />
-                    <circle cx="5" cy="19" r="1.8" stroke="currentColor" stroke-width="1.4" />
-                    <circle cx="19" cy="19" r="1.8" stroke="currentColor" stroke-width="1.4" />
-                    <line x1="12" y1="6.8" x2="5" y2="17.2" stroke="currentColor" stroke-width="1.2" />
-                    <line x1="12" y1="6.8" x2="19" y2="17.2" stroke="currentColor" stroke-width="1.2" />
-                    <line x1="6.8" y1="19" x2="17.2" y2="19" stroke="currentColor" stroke-width="1.2" />
-                </svg>
-            </span>
-            <h2>Network Topology &amp; Mesh Routing</h2>
-            <p>Disabled, to be implemented in the final PoE.</p>
+    <section class="landing-hero">
+        <div class="landing-copy">
+            <div class="landing-kicker">IOT OPERATIONS / CONTROL PLANE</div>
+            <h1>Every signal.<br /><span>One clear picture.</span></h1>
+            <p>Monitor your sensor fleet, spot anomalies as they happen, and make confident operational decisions from one live workspace.</p>
+            <a class="landing-primary" href="/ingestion">Open live dashboard <span>↗</span></a>
+            <div class="landing-trust"><span class="status-dot"></span> Authenticated operator session</div>
         </div>
-    </div>
+
+        <div class="landing-visual" aria-label="Illustration of a live connected sensor network">
+            <div class="landing-visual-label">NETWORK / LIVE VIEW</div>
+            <svg viewBox="0 0 640 470" role="img" aria-label="Live mesh of connected sensors">
+                <defs>
+                    <radialGradient id="nodeGlow">
+                        <stop offset="0" stop-color="#d8a832" stop-opacity=".38" />
+                        <stop offset="1" stop-color="#d8a832" stop-opacity="0" />
+                    </radialGradient>
+                </defs>
+                <circle cx="325" cy="235" r="176" class="landing-orbit landing-orbit-dash" />
+                <circle cx="325" cy="235" r="112" class="landing-orbit" />
+                <path d="M325 235 128 107M325 235 490 87M325 235 537 249M325 235 447 376M325 235 226 390M325 235 91 282M128 107 226 390M490 87 447 376"
+                      class="landing-link" />
+                <circle cx="325" cy="235" r="58" class="landing-center-glow" />
+                <circle cx="325" cy="235" r="38" class="landing-center" />
+                <text x="325" y="232" class="landing-core-title" text-anchor="middle">SMART</text>
+                <text x="325" y="249" class="landing-core-title" text-anchor="middle">GATEWAY</text>
+                <g class="landing-node"><circle cx="128" cy="107" r="27" fill="url(#nodeGlow)" /><circle cx="128" cy="107" r="8" /><text x="128" y="79">ENV-01</text></g>
+                <g class="landing-node landing-node-green"><circle cx="490" cy="87" r="27" /><circle cx="490" cy="87" r="8" /><text x="490" y="59">PWR-04</text></g>
+                <g class="landing-node"><circle cx="537" cy="249" r="27" /><circle cx="537" cy="249" r="8" /><text x="537" y="221">ACT-02</text></g>
+                <g class="landing-node landing-node-green"><circle cx="447" cy="376" r="27" /><circle cx="447" cy="376" r="8" /><text x="447" y="349">ENV-06</text></g>
+                <g class="landing-node"><circle cx="226" cy="390" r="27" /><circle cx="226" cy="390" r="8" /><text x="226" y="363">PWR-03</text></g>
+                <g class="landing-node landing-node-amber"><circle cx="91" cy="282" r="27" /><circle cx="91" cy="282" r="8" /><text x="91" y="254">ENV-08</text></g>
+            </svg>
+            <div class="landing-visual-footer"><span>06 NODES ACTIVE</span><span>TELEMETRY STREAMING</span></div>
+        </div>
+    </section>
+
+    <section class="landing-capabilities">
+        <div class="landing-section-heading">
+            <div>
+                <div class="landing-kicker">OPERATOR WORKSPACE</div>
+                <h2>From live data to decisive action.</h2>
+            </div>
+            <span>BUILT FOR REAL-TIME OPERATIONS</span>
+        </div>
+        <div class="pillar-grid">
+            <a class="pillar-card pillar-active" href="/ingestion">
+                <span class="pillar-icon">
+                    <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <circle cx="12" cy="12" r="2.4" fill="currentColor" />
+                        <circle cx="5" cy="6" r="1.6" fill="currentColor" opacity="0.7" />
+                        <circle cx="19" cy="6" r="1.6" fill="currentColor" opacity="0.7" />
+                        <circle cx="5" cy="18" r="1.6" fill="currentColor" opacity="0.7" />
+                        <circle cx="19" cy="18" r="1.6" fill="currentColor" opacity="0.7" />
+                        <path d="m12 12-7-6m7 6 7-6m-7 6-7 6m7-6 7 6" stroke="currentColor" opacity="0.5" />
+                    </svg>
+                </span>
+                <h2>Sensor ingestion &amp; telemetry</h2>
+                <p>Follow device health, filter by deployment zone, and investigate live anomalies in the constellation.</p>
+                <span class="pillar-cta">Explore live network <span>→</span></span>
+            </a>
+            <a class="pillar-card pillar-active" href="/commands">
+                <span class="pillar-icon">
+                    <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <path d="M4 5h16v10H9l-4 4V5z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" />
+                        <path d="M8 9h8M8 12h5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" />
+                    </svg>
+                </span>
+                <h2>Commands &amp; recommendations</h2>
+                <p>Manage manual overrides, review learned suggestions, and undo recent operator actions.</p>
+                <span class="pillar-cta">Open command stream <span>→</span></span>
+            </a>
+            <div class="pillar-card landing-platform-card">
+                <span class="pillar-icon">
+                    <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <circle cx="12" cy="5" r="1.8" stroke="currentColor" stroke-width="1.4" />
+                        <circle cx="5" cy="19" r="1.8" stroke="currentColor" stroke-width="1.4" />
+                        <circle cx="19" cy="19" r="1.8" stroke="currentColor" stroke-width="1.4" />
+                        <path d="M12 7 5 17m7-10 7 10M7 19h10" stroke="currentColor" stroke-width="1.2" />
+                    </svg>
+                </span>
+                <h2>Network topology</h2>
+                <p>Mesh routing and topology tools are planned for a future release.</p>
+                <span class="landing-coming-soon">COMING SOON</span>
+            </div>
+        </div>
+    </section>
+
+    <footer class="landing-footer">
+        <span>SMART-X / IOT MESH ECOSYSTEM</span>
+        <span>SECURE SESSION · LIVE TELEMETRY</span>
+    </footer>
 </div>

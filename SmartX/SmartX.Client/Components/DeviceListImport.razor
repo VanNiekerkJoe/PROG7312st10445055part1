@@ -1,0 +1,164 @@
+@using Microsoft.AspNetCore.Components.Forms
+@using SmartX.Core.Telemetry
+@inject TelemetryApiClient ApiClient
+
+<section class="device-import panel">
+    <div class="device-import-heading">
+        <div>
+            <p class="panel-title">Bulk device registration</p>
+            <p class="device-import-help">Upload a tab-separated .txt file: sub-zone, MAC address, category, location.</p>
+        </div>
+        <button class="test-data-btn" type="button" @onclick="OnClose">Close</button>
+    </div>
+    <InputFile OnChange="ImportAsync" accept=".txt,text/plain" />
+    <p class="device-import-example">Example: <code>SUB-ZONE-1&nbsp;&nbsp; 24:6F:28:AA:BB:CC&nbsp;&nbsp; Environmental&nbsp;&nbsp; North greenhouse</code></p>
+    @if (_busy)
+    {
+        <p class="device-import-progress">Registering devices… @_registered.Count completed</p>
+    }
+    @if (_hasProcessed || _errors.Count > 0)
+    {
+        <div class="device-import-results" role="status">
+            <strong>Import complete: @_registered.Count registered, @_errors.Count failed.</strong>
+            @if (_errors.Count > 0)
+            {
+                <ul>
+                    @foreach (var error in _errors)
+                    {
+                        <li>Line @error.Line: @error.Message</li>
+                    }
+                </ul>
+            }
+        </div>
+    }
+</section>
+
+@code {
+    private const long MaxFileSize = 1_048_576;
+    private const int MaxRows = 500;
+    private readonly List<string> _registered = [];
+    private readonly List<ImportError> _errors = [];
+    private bool _busy;
+    private bool _hasProcessed;
+
+    [Parameter] public EventCallback<DeviceStatus> OnRegistered { get; set; }
+    [Parameter] public EventCallback OnClose { get; set; }
+
+    private async Task ImportAsync(InputFileChangeEventArgs args)
+    {
+        _registered.Clear();
+        _errors.Clear();
+        _hasProcessed = false;
+        if (_busy)
+        {
+            return;
+        }
+
+        if (!string.Equals(Path.GetExtension(args.File.Name), ".txt", StringComparison.OrdinalIgnoreCase))
+        {
+            _errors.Add(new ImportError(0, "Choose a .txt device-list file."));
+            _hasProcessed = true;
+            return;
+        }
+
+        _busy = true;
+        try
+        {
+            string contents;
+            await using (var stream = args.File.OpenReadStream(MaxFileSize))
+            using (var reader = new StreamReader(stream))
+            {
+                contents = await reader.ReadToEndAsync();
+            }
+
+            var rows = contents.Split('\n');
+            var nonEmptyRows = rows.Where(row => !string.IsNullOrWhiteSpace(row)).ToArray();
+            var hasHeader = nonEmptyRows.Length > 0 && IsHeader(nonEmptyRows[0].TrimEnd('\r').Split('\t'));
+            if (nonEmptyRows.Length - (hasHeader ? 1 : 0) > MaxRows)
+            {
+                _errors.Add(new ImportError(0, $"File exceeds the {MaxRows}-row limit."));
+                return;
+            }
+
+            var headerChecked = false;
+            for (var index = 0; index < rows.Length; index++)
+            {
+                var lineNumber = index + 1;
+                var line = rows[index].TrimEnd('\r');
+                if (string.IsNullOrWhiteSpace(line))
+                {
+                    continue;
+                }
+
+                var fields = line.Split('\t');
+                if (!headerChecked)
+                {
+                    headerChecked = true;
+                    if (IsHeader(fields))
+                    {
+                        continue;
+                    }
+                }
+                _hasProcessed = true;
+
+                if (fields.Length != 4)
+                {
+                    _errors.Add(new ImportError(lineNumber, "Expected exactly four tab-separated columns."));
+                    continue;
+                }
+
+                var subZoneId = fields[0].Trim();
+                var macAddress = fields[1].Trim();
+                var categoryText = fields[2].Trim();
+                var location = fields[3].Trim();
+                if (string.IsNullOrWhiteSpace(subZoneId) || string.IsNullOrWhiteSpace(macAddress) ||
+                    string.IsNullOrWhiteSpace(location) ||
+                    !Enum.TryParse<SensorCategory>(categoryText, true, out var category) ||
+                    !Enum.IsDefined(category))
+                {
+                    _errors.Add(new ImportError(lineNumber, "Sub-zone, MAC, valid category, and location are required."));
+                    continue;
+                }
+
+                try
+                {
+                    var result = await ApiClient.RegisterDeviceAsync(subZoneId, macAddress, category, location);
+                    if (result?.IsValid == true && result.Device is not null)
+                    {
+                        _registered.Add(result.Device.DeviceId);
+                        await OnRegistered.InvokeAsync(result.Device);
+                    }
+                    else
+                    {
+                        _errors.Add(new ImportError(
+                            lineNumber,
+                            result is null ? "No response from the API." : string.Join(" ", result.Errors)));
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Console.Error.WriteLine($"Device import failed on line {lineNumber}: {ex.Message}");
+                    _errors.Add(new ImportError(lineNumber, "The API could not register this device."));
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"Could not read the device import file: {ex.Message}");
+            _errors.Add(new ImportError(0, "Could not read this file. Choose a valid .txt file no larger than 1 MB."));
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private static bool IsHeader(string[] fields) =>
+        fields.Length == 4 &&
+        string.Equals(fields[0].Trim(), "subZoneId", StringComparison.OrdinalIgnoreCase) &&
+        string.Equals(fields[1].Trim(), "MAC address", StringComparison.OrdinalIgnoreCase) &&
+        string.Equals(fields[2].Trim(), "category", StringComparison.OrdinalIgnoreCase) &&
+        string.Equals(fields[3].Trim(), "location description", StringComparison.OrdinalIgnoreCase);
+
+    private sealed record ImportError(int Line, string Message);
+}

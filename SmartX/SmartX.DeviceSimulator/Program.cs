@@ -9,7 +9,7 @@ using SmartX.Core.Telemetry;
 // /api/telemetry/ingest, exactly the way real hardware would. Nothing here
 // touches the API's internals.
 //
-// Usage:  dotnet run --project SmartX.DeviceSimulator [apiBaseUrl]
+// Usage:  SMARTX_FIREBASE_EMAIL=... SMARTX_FIREBASE_PASSWORD=... dotnet run --project SmartX.DeviceSimulator [apiBaseUrl]
 // Keys:   S = spike a random sensor (critical packet)
 //         X = silence a random device for 30 s (simulates a disconnect)
 //         Q = quit
@@ -26,6 +26,20 @@ if (apiBase.Contains("localhost", StringComparison.OrdinalIgnoreCase))
 }
 
 using var http = new HttpClient(handler) { BaseAddress = new Uri(apiBase), Timeout = TimeSpan.FromSeconds(10) };
+using var firebaseHttp = new HttpClient { Timeout = TimeSpan.FromSeconds(10) };
+
+var firebaseEmail = Environment.GetEnvironmentVariable("SMARTX_FIREBASE_EMAIL");
+var firebasePassword = Environment.GetEnvironmentVariable("SMARTX_FIREBASE_PASSWORD");
+if (string.IsNullOrWhiteSpace(firebaseEmail) || string.IsNullOrWhiteSpace(firebasePassword))
+{
+    throw new InvalidOperationException(
+        "Set SMARTX_FIREBASE_EMAIL and SMARTX_FIREBASE_PASSWORD to a Firebase operator account before starting the simulator.");
+}
+
+var firebaseConfig = await http.GetFromJsonAsync<FirebaseConfiguration>("/api/auth/config")
+    ?? throw new InvalidOperationException("The API did not return Firebase client configuration.");
+var authToken = await SignInAsync(firebaseHttp, firebaseConfig, firebaseEmail, firebasePassword);
+http.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", authToken.IdToken);
 
 var random = new Random();
 var fleet = new Dictionary<string, SimDevice>(StringComparer.OrdinalIgnoreCase);
@@ -61,6 +75,11 @@ while (true)
     }
 
     var now = DateTimeOffset.UtcNow;
+    if (authToken.ExpiresAt <= now.AddMinutes(2))
+    {
+        authToken = await RefreshAsync(firebaseHttp, firebaseConfig, authToken.RefreshToken);
+        http.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", authToken.IdToken);
+    }
 
     if (now - lastTreeRefresh >= treeRefreshEvery)
     {
@@ -185,6 +204,43 @@ async Task ReportAsync(SimDevice device, bool spike, DateTimeOffset now)
     }
 }
 
+async Task<FirebaseToken> SignInAsync(HttpClient authHttp, FirebaseConfiguration config, string email, string password)
+{
+    using var response = await authHttp.PostAsJsonAsync(
+        $"https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key={Uri.EscapeDataString(config.ApiKey)}",
+        new { email, password, returnSecureToken = true });
+    response.EnsureSuccessStatusCode();
+    var result = await response.Content.ReadFromJsonAsync<FirebaseSignInResponse>()
+        ?? throw new InvalidOperationException("Firebase returned an empty sign-in response.");
+    if (!int.TryParse(result.ExpiresIn, out var seconds))
+    {
+        throw new InvalidOperationException("Firebase returned an invalid ID token lifetime.");
+    }
+
+    return new FirebaseToken(result.IdToken, result.RefreshToken, DateTimeOffset.UtcNow.AddSeconds(seconds));
+}
+
+async Task<FirebaseToken> RefreshAsync(HttpClient authHttp, FirebaseConfiguration config, string refreshToken)
+{
+    using var response = await authHttp.PostAsync(
+        $"https://securetoken.googleapis.com/v1/token?key={Uri.EscapeDataString(config.ApiKey)}",
+        new FormUrlEncodedContent(new Dictionary<string, string>
+        {
+            ["grant_type"] = "refresh_token",
+            ["refresh_token"] = refreshToken
+        }));
+    response.EnsureSuccessStatusCode();
+    var result = await response.Content.ReadFromJsonAsync<FirebaseRefreshResponse>()
+        ?? throw new InvalidOperationException("Firebase returned an empty token refresh response.");
+    var idToken = result.IdToken ?? result.AccessToken;
+    if (string.IsNullOrWhiteSpace(idToken) || !int.TryParse(result.ExpiresIn, out var seconds))
+    {
+        throw new InvalidOperationException("Firebase returned an invalid refreshed token.");
+    }
+
+    return new FirebaseToken(idToken, result.RefreshToken, DateTimeOffset.UtcNow.AddSeconds(seconds));
+}
+
 static IEnumerable<TreeNode> Flatten(TreeNode node)
 {
     yield return node;
@@ -205,6 +261,10 @@ static double NoiseFor(SensorCategory category) => category switch
 };
 
 internal sealed record TreeNode(string Id, string Name, string NodeType, string? MacAddress, string? Category, List<TreeNode> Children);
+internal sealed record FirebaseConfiguration(string ApiKey, string ProjectId);
+internal sealed record FirebaseToken(string IdToken, string RefreshToken, DateTimeOffset ExpiresAt);
+internal sealed record FirebaseSignInResponse(string IdToken, string RefreshToken, string ExpiresIn);
+internal sealed record FirebaseRefreshResponse(string? IdToken, string? AccessToken, string RefreshToken, string ExpiresIn);
 
 internal sealed class SimDevice(string macAddress, string deviceId, SensorCategory category)
 {

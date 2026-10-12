@@ -1,5 +1,6 @@
 @using SmartX.Client.Services
 @inject LiveStateService Live
+@inject FirebaseAuthSession Auth
 @implements IDisposable
 
 <nav class="topnav">
@@ -15,6 +16,8 @@
     <span class="topnav-live @(Live.IsConnected ? "topnav-live-on" : "topnav-live-off")">
         @(Live.IsConnected ? "live" : "offline")
     </span>
+    <span class="topnav-user">@Auth.Email</span>
+    <button class="topnav-signout" @onclick="Auth.SignOutAsync">Sign out</button>
 </nav>
 
 @code {

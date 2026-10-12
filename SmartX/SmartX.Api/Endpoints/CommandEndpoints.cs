@@ -12,6 +12,7 @@ public static class CommandEndpoints
     public static void MapCommandEndpoints(this WebApplication app)
     {
         var commands = app.MapGroup("/api/commands").WithTags("Commands");
+        commands.RequireAuthorization();
 
         commands.MapGet("/", (CommandHistory history) =>
             Results.Ok(new CommandLogResponse(history.Snapshot(), history.UndoDepth)));
@@ -29,6 +30,7 @@ public static class CommandEndpoints
         });
 
         var insights = app.MapGroup("/api/insights").WithTags("Insights");
+        insights.RequireAuthorization();
 
         // "Suggested Actions" for the dashboard: learned patterns, cold-start
         // rules and the problem-device watch-list.
