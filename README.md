@@ -297,7 +297,7 @@ The "+ 1" is a prior (add-one smoothing). Two observations of the same command g
 
 A learned pattern needs **minimum support of 1.5** recency-weighted observations: two fresh observations, or three that are one half-life old. A single one-off never qualifies. Only the best follow-up and, if it has at least half the leader's weight, one runner-up are shown, so the panel does not offer "Relay ON" and "Relay OFF" side by side because of a single stray command.
 
-Results are ordered by confidence, then learned before rule before watch-list, then device ID, so the order is stable.
+Suggestion slots reserve room for the best matching search suggestion, watch-list or disconnect inspection, alert-learned action, and cold-start rule before filling remaining slots by the normal ranking. The selected suggestions are then sorted by confidence, learned before rule before watch-list, then device ID, so slot guarantees do not change the panel's top-to-bottom ranking.
 
 ### Recency decay
 
@@ -324,7 +324,8 @@ All tunables (`FollowWindow`, half-lives, `MinSupport`, `PriorWeight`, `WatchThr
 |---|---|---|
 | **Learned (alert)** | An alert context has a pair above the support threshold | "Recency-weighted operator evidence for Relay OFF is 2.9 of 3.0 effective observations after similar Power Anomalous alerts" |
 | **Learned (search)** | The operator is searching a term that previously preceded commands | "This command followed the search 'pump' with 3.0 of 3.0 recency-weighted effective observations" |
-| **Cold-start rules** | A problem device has no learned alert pattern yet (for example anomalous Power suggests Relay OFF) | Rule-based suggestion |
+| **Cold-start rules** | An anomalous device has no learned alert pattern yet (for example anomalous Power suggests Relay OFF) | Rule-based suggestion |
+| **Disconnect inspection** | A device is disconnected and has stopped reporting | "Inspect <device>: no data for <duration>" (no remote command is recommended because the device may not be able to receive it) |
 | **Watch-list** | A device's recency-weighted alert count reaches 2.5 (about three alerts in a few hours) | "Inspect <device>" (no command is applied automatically) |
 
 Suggestions appear in the **Suggested actions / Automated insights** panel before the operator searches for them, with a confidence bar and an **Apply** button. Wording is deliberately cautious: learned responses are presented as workflow preferences, not diagnoses, and tell the operator to confirm the device's state first.

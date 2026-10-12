@@ -182,7 +182,6 @@ public sealed class ActionPatternEngine
         {
             var now = _clock.GetUtcNow();
             Seed(AlertContext(SensorCategory.Power, AnomalySeverity.Anomalous), CommandType.RelayOff.ToString(), 4, now);
-            Seed(AlertContext(SensorCategory.Power, AnomalySeverity.Disconnected), CommandType.RelayOn.ToString(), 3, now);
             Seed(AlertContext(SensorCategory.Environmental, AnomalySeverity.Anomalous), CommandType.PumpOff.ToString(), 4, now);
             Seed(AlertContext(SensorCategory.Actuator, AnomalySeverity.Anomalous), CommandType.ValveClose.ToString(), 3, now);
 
@@ -361,7 +360,14 @@ public sealed class ActionPatternEngine
             Add(suggestion);
         }
 
-        return selected.Take(Math.Max(0, max)).ToList();
+        // The slot guarantees decide which suggestions make the cut; the panel still reads top to bottom by confidence.
+        return selected
+            .Take(Math.Max(0, max))
+            .OrderByDescending(s => s.Confidence)
+            .ThenBy(s => BasisRank(s.Basis))
+            .ThenBy(s => s.DeviceId, StringComparer.Ordinal)
+            .ThenBy(s => s.Title, StringComparer.Ordinal)
+            .ToList();
 
         void AddFirst(Func<SuggestedAction, bool> predicate)
         {
