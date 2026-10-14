@@ -14,7 +14,7 @@ var clientOrigin = builder.Configuration["Cors:ClientOrigin"] ?? "https://localh
 var firebaseProjectId = builder.Configuration["Firebase:ProjectId"];
 if (string.IsNullOrWhiteSpace(firebaseProjectId))
 {
-    throw new InvalidOperationException("Firebase:ProjectId must be configured using user-secrets or environment variables.");
+    throw new InvalidOperationException("Firebase:ProjectId must be configured in appsettings.json, user-secrets, or environment variables.");
 }
 
 builder.Services.AddCors(options =>

@@ -149,18 +149,11 @@ Open the URL the client prints (default `https://localhost:5173`).
 
 ### Firebase authentication setup
 
-The dashboard uses Firebase email/password authentication. All sensor, telemetry, command, insight, and SignalR hub operations require a valid Firebase ID token. The Firebase Web API key is supplied to the client by the API's anonymous configuration endpoint; do not commit it to source control.
+The dashboard uses Firebase email/password authentication. The Firebase project ID and Web API key are included in `SmartX/SmartX.Api/appsettings.json` so a fresh clone can run without local user-secrets. The Web API key is an identifier used by client applications, not an account credential; restrict it in Google Cloud Console to the **Identity Toolkit API**. All sensor, telemetry, command, insight, and SignalR hub operations require a valid Firebase ID token.
 
-Configure the API's local user-secrets store (from the repository root):
+In Firebase Console, enable the **Email/Password** sign-in provider. The sign-in screen can create an account or sign in an existing operator, so a marker can register an account. Provide a demo operator account's credentials in your submission notes, not in this repository. The API validates token signature, issuer, audience, and expiry against the configured project. The root health endpoint and `/api/auth/config` remain public; dashboard APIs and both hubs are protected.
 
-```
-dotnet user-secrets set "Firebase:ApiKey" "<your-firebase-web-api-key>" --project SmartX/SmartX.Api/SmartX.Api.csproj
-dotnet user-secrets set "Firebase:ProjectId" "<your-firebase-project-id>" --project SmartX/SmartX.Api/SmartX.Api.csproj
-```
-
-In Firebase Console, enable the **Email/Password** sign-in provider. The sign-in screen can create an account or sign in an existing operator. The API validates token signature, issuer, audience, and expiry against the configured project. The root health endpoint and `/api/auth/config` remain public; dashboard APIs and both hubs are protected.
-
-The device simulator also authenticates. Set `SMARTX_FIREBASE_EMAIL` and `SMARTX_FIREBASE_PASSWORD` in its process environment to a Firebase operator account before starting it. It obtains and refreshes its ID token automatically. Do not put account passwords in source files.
+The attachment encryption key in `appsettings.json` is a development key; replace it with a securely managed key for production. The device simulator also authenticates. Set `SMARTX_FIREBASE_EMAIL` and `SMARTX_FIREBASE_PASSWORD` in its process environment to a Firebase operator account before starting it. It obtains and refreshes its ID token automatically. Do not put account passwords in source files.
 
 ### Importing a device list
 
