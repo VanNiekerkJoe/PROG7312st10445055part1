@@ -143,13 +143,19 @@ dotnet run                          # defaults to https://localhost:5001
 
 Confirm the API's port from its console output. If it differs from `https://localhost:5001`, update `apiBaseAddress` in `SmartX.Client/Program.cs` and `Cors:ClientOrigin` in `SmartX.Api/appsettings.json`.
 
+**Browser address and certificate.** Open the client at **https://localhost:5173**. The plain-HTTP address (`http://localhost:5172`) is also allowed by the API's CORS policy (`Cors:AdditionalOrigins`), so either works, but any other origin is blocked by the browser. If the browser warns about the certificate, or sign-in says it could not contact Firebase authentication, trust the .NET development certificate once and restart the browser and the API:
+
+```
+dotnet dev-certs https --trust
+```
+
 Open the URL the client prints (default `https://localhost:5173`).
 
 **Simulator keys:** `S` spikes a random sensor, `X` silences a random device for 30 s, `Q` quits.
 
 ### Firebase authentication setup
 
-The dashboard uses Firebase email/password authentication. The Firebase project ID and Web API key are included in `SmartX/SmartX.Api/appsettings.json` so a fresh clone can run without local user-secrets. The Web API key is an identifier used by client applications, not an account credential; restrict it in Google Cloud Console to the **Identity Toolkit API**. All sensor, telemetry, command, insight, and SignalR hub operations require a valid Firebase ID token.
+The dashboard uses Firebase email/password authentication. The Firebase project ID and Web API key are included in `SmartX/SmartX.Api/appsettings.json` so a fresh clone can run without local user-secrets. The Web API key is an identifier used by client applications, not an account credential; restrict it in Google Cloud Console to the **Identity Toolkit API** and the **Token Service API** (the second one refreshes sign-in sessions). All sensor, telemetry, command, insight, and SignalR hub operations require a valid Firebase ID token.
 
 In Firebase Console, enable the **Email/Password** sign-in provider. The sign-in screen can create an account or sign in an existing operator, so a marker can register an account. Provide a demo operator account's credentials in your submission notes, not in this repository. The API validates token signature, issuer, audience, and expiry against the configured project. The root health endpoint and `/api/auth/config` remain public; dashboard APIs and both hubs are protected.
 

@@ -10,7 +10,13 @@ using Microsoft.IdentityModel.Tokens;
 
 var builder = WebApplication.CreateBuilder(args);
 
-var clientOrigin = builder.Configuration["Cors:ClientOrigin"] ?? "https://localhost:5173";
+// The browser only lets the dashboard call this API from an origin listed here. The client launches on
+// both https://localhost:5173 and http://localhost:5172, so both must be allowed or sign-in fails with
+// "Could not contact Firebase authentication" when the plain-HTTP address is used.
+var clientOrigins = (builder.Configuration.GetSection("Cors:AdditionalOrigins").Get<string[]>() ?? [])
+    .Append(builder.Configuration["Cors:ClientOrigin"] ?? "https://localhost:5173")
+    .Distinct(StringComparer.OrdinalIgnoreCase)
+    .ToArray();
 var firebaseProjectId = builder.Configuration["Firebase:ProjectId"];
 if (string.IsNullOrWhiteSpace(firebaseProjectId))
 {
@@ -20,7 +26,7 @@ if (string.IsNullOrWhiteSpace(firebaseProjectId))
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("Client", policy => policy
-        .WithOrigins(clientOrigin)
+        .WithOrigins(clientOrigins)
         .AllowAnyHeader()
         .AllowAnyMethod()
         .AllowCredentials());
