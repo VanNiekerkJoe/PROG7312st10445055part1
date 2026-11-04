@@ -1,0 +1,570 @@
+diff --git a/SmartX/SmartX.Api.Tests/Part3MeshTests.cs b/SmartX/SmartX.Api.Tests/Part3MeshTests.cs
+index 72ad9db..0730d7f 100644
+--- a/SmartX/SmartX.Api.Tests/Part3MeshTests.cs
++++ b/SmartX/SmartX.Api.Tests/Part3MeshTests.cs
+@@ -181,6 +181,68 @@ public class MeshGraphTests
+         Assert.Equal(new[] { "B", "C", "G" }, MeshGraph.PathToRoot(g.Prim(), "B"));
+     }
+ 
++    [Fact]
++    public void ShortestPath_CanBeCheaperForOneNodeThanItsSpanningTreeRoute()
++    {
++        // G-A 2, G-B 2, A-B 1: the MST takes G-A then A-B (total 3), so B routes via A at cost 3,
++        // but B's own cheapest path is the direct link at cost 2.
++        var g = new MeshGraph("G");
++        g.AddEdge("G", "A", 2);
++        g.AddEdge("G", "B", 2);
++        g.AddEdge("A", "B", 1);
++
++        var mst = g.Prim();
++        var shortest = g.ShortestPaths();
++
++        Assert.Equal(3, g.PathCost(MeshGraph.PathToRoot(mst, "B")));
++        Assert.Equal(2, shortest.Distance["B"]);
++        Assert.Equal(new[] { "B", "G" }, MeshGraph.PathToRoot(shortest, "B"));
++        Assert.Equal(mst.TotalCost, 3);
++    }
++
++    [Fact]
++    public void ShortestPath_NeverCostsMoreThanTheTreeRoute_AndSkipsDownNodes()
++    {
++        var random = new Random(11);
++        for (var trial = 0; trial < 100; trial++)
++        {
++            var g = new MeshGraph("G");
++            var n = 5 + random.Next(10);
++            for (var i = 1; i < n; i++)
++            {
++                g.AddEdge(i == 1 ? "G" : "N" + random.Next(1, i), "N" + i, 1 + random.Next(9));
++            }
++
++            for (var extra = 0; extra < n; extra++)
++            {
++                g.AddEdge("N" + random.Next(1, n), random.Next(2) == 0 ? "G" : "N" + random.Next(1, n), 1 + random.Next(9));
++            }
++
++            g.SetDown("N" + random.Next(1, n), true);
++            var mst = g.Prim();
++            var shortest = g.ShortestPaths();
++
++            Assert.Equal(mst.ParentOf.Count, shortest.ParentOf.Count);
++            foreach (var node in mst.ParentOf.Keys)
++            {
++                Assert.True(shortest.Distance[node] <= g.PathCost(MeshGraph.PathToRoot(mst, node)));
++                Assert.Equal(shortest.Distance[node], g.PathCost(MeshGraph.PathToRoot(shortest, node)));
++            }
++        }
++    }
++
++    [Fact]
++    public void HopsOf_ListsEachLinkWithItsCost()
++    {
++        var g = SampleMesh();
++
++        var hops = g.HopsOf(new[] { "B", "A", "G" });
++
++        Assert.Equal(2, hops.Count);
++        Assert.Equal(2, hops[0].Cost);
++        Assert.Equal("G", hops[1].To);
++    }
++
+     [Fact]
+     public void Connectivity_ReportsDownAndStrandedNodes()
+     {
+@@ -253,6 +315,8 @@ public class MeshTopologyServiceTests
+         Assert.True(healthy.Found);
+         Assert.False(healthy.Rerouted);
+         Assert.Equal("GATEWAY", healthy.LivePath[^1]);
++        Assert.Equal(healthy.LivePath.Count - 1, healthy.Hops.Count);
++        Assert.True(healthy.ShortestCost <= healthy.LiveCost);
+ 
+         var uplink = healthy.LivePath[^2];
+         Assert.True(service.Fail(uplink));
+diff --git a/SmartX/SmartX.Api/Services/MeshTopologyService.cs b/SmartX/SmartX.Api/Services/MeshTopologyService.cs
+index b98dc32..576d7f6 100644
+--- a/SmartX/SmartX.Api/Services/MeshTopologyService.cs
++++ b/SmartX/SmartX.Api/Services/MeshTopologyService.cs
+@@ -126,16 +126,17 @@ public sealed class MeshTopologyService(SensorRegistry registry, SortedHistoryLo
+             {
+                 if (id == graph.GatewayId)
+                 {
+-                    return new MeshNodeDto(id, "Gateway", true, null, null, null, false, null, 0, null);
++                    return new MeshNodeDto(id, "Gateway", true, null, null, null, false, null, 0, null, 0);
+                 }
+ 
+                 var node = snap.Devices[id];
+                 mst.ParentOf.TryGetValue(id, out var parent);
+                 mst.HopsToRoot.TryGetValue(id, out var hops);
+                 snap.DownReason.TryGetValue(id, out var reason);
++                var cost = parent is null ? -1 : graph.PathCost(MeshGraph.PathToRoot(mst, id));
+                 return new MeshNodeDto(
+                     id, node.Name, false, node.Sensor!.MacAddress, snap.SubnetOf[id], node.Sensor.Category,
+-                    graph.IsDown(id), reason, parent is null ? -1 : hops, parent);
++                    graph.IsDown(id), reason, parent is null ? -1 : hops, parent, cost);
+             })
+             .ToList();
+ 
+@@ -158,7 +159,7 @@ public sealed class MeshTopologyService(SensorRegistry registry, SortedHistoryLo
+         if (id is null)
+         {
+             return new MeshRouteResponse(query, false, null, null, $"No sensor matches \"{query}\". Try a MAC address or a device ID.",
+-                [], 0, [], 0, false, []);
++                [], 0, [], 0, false, [], [], [], 0);
+         }
+ 
+         var mac = healthy.Devices[id].Sensor!.MacAddress;
+@@ -176,7 +177,7 @@ public sealed class MeshTopologyService(SensorRegistry registry, SortedHistoryLo
+                 .ToList();
+             return new MeshRouteResponse(query, true, id, mac,
+                 $"{id} is down ({live.DownReason[id]}). Neighbouring nodes that can still carry traffic are listed as alternative hops.",
+-                normalPath, normalCost, [], 0, false, hops);
++                normalPath, normalCost, [], 0, false, hops, [], [], 0);
+         }
+ 
+         var liveMst = live.Graph.Prim();
+@@ -185,16 +186,24 @@ public sealed class MeshTopologyService(SensorRegistry registry, SortedHistoryLo
+         {
+             return new MeshRouteResponse(query, true, id, mac,
+                 $"{id} is alive but stranded: every path to the gateway crosses a failed node.",
+-                normalPath, normalCost, [], 0, false, []);
++                normalPath, normalCost, [], 0, false, [], [], [], 0);
+         }
+ 
+         var liveCost = live.Graph.PathCost(livePath);
++        var shortestPath = MeshGraph.PathToRoot(live.Graph.ShortestPaths(), id);
++        var shortestCost = live.Graph.PathCost(shortestPath);
+         var rerouted = !livePath.SequenceEqual(normalPath);
+-        return new MeshRouteResponse(query, true, id, mac,
+-            rerouted
+-                ? $"Route healed around a failure: {livePath.Count - 1} hops, cost {liveCost} (was {normalCost})."
+-                : $"Healthy route: {livePath.Count - 1} hops, cost {liveCost}.",
+-            normalPath, normalCost, livePath, liveCost, rerouted, []);
++
++        var message = rerouted
++            ? $"Route healed around a failure: {livePath.Count - 1} hops, cost {liveCost} (was {normalCost})."
++            : $"Healthy route: {livePath.Count - 1} hops, cost {liveCost}.";
++        message += shortestCost < liveCost
++            ? $" The cheapest possible path for this node alone costs {shortestCost}; the spanning tree trades that for a lower total network cost."
++            : " This is also the cheapest possible path for this node.";
++
++        return new MeshRouteResponse(query, true, id, mac, message,
++            normalPath, normalCost, livePath, liveCost, rerouted, [],
++            live.Graph.HopsOf(livePath), shortestPath, shortestCost);
+     }
+ 
+     // ------------------------------------------------------------------ traversal
+diff --git a/SmartX/SmartX.Client/Pages/MeshTopology.razor b/SmartX/SmartX.Client/Pages/MeshTopology.razor
+index 0b150f1..d411060 100644
+--- a/SmartX/SmartX.Client/Pages/MeshTopology.razor
++++ b/SmartX/SmartX.Client/Pages/MeshTopology.razor
+@@ -55,12 +55,12 @@
+             <section class="panel mesh-map-panel">
+                 <p class="panel-title">Live mesh <span class="cs-count">thick green = minimum spanning tree</span></p>
+ 
+-                <svg class="mesh-svg" viewBox="0 0 760 560" role="img" aria-label="Mesh network graph">
++                <svg class="mesh-svg" viewBox="0 0 760 580" role="img" aria-label="Mesh network graph">
+                     @foreach (var edge in _topo.Edges)
+                     {
+                         if (!_pos.TryGetValue(edge.A, out var a) || !_pos.TryGetValue(edge.B, out var b)) { continue; }
+                         var key = EdgeKey(edge.A, edge.B);
+-                        var touchesDown = IsDown(edge.A) || IsDown(edge.B);
++                        var touchesDown = _downSet.Contains(edge.A) || _downSet.Contains(edge.B);
+                         <line class="@EdgeClass(edge, key, touchesDown)" x1="@F(a.X)" y1="@F(a.Y)" x2="@F(b.X)" y2="@F(b.Y)" />
+                         @if (_topo.Nodes.Count <= 30 && !touchesDown)
+                         {
+@@ -68,11 +68,18 @@
+                         }
+                     }
+ 
++                    @foreach (var label in _subnetLabels)
++                    {
++                        <g><text class="mesh-subnet" x="@F(label.X)" y="@F(label.Y)">@label.Name</text></g>
++                    }
++
+                     @foreach (var node in _topo.Nodes)
+                     {
+                         if (!_pos.TryGetValue(node.Id, out var p)) { continue; }
+                         var id = node.Id;
+-                        <g class="@NodeClass(node)" transform="translate(@F(p.X) @F(p.Y))" @onclick="() => TrackAsync(id)">
++                        <g class="@NodeClass(node)" transform="translate(@F(p.X) @F(p.Y))" role="button" tabindex="0"
++                           aria-label="@NodeTooltip(node).Replace("\n", ", ")"
++                           @onclick="() => TrackAsync(id)" @onkeydown="e => OnNodeKey(e, id)">
+                             <title>@NodeTooltip(node)</title>
+                             @if (node.IsGateway)
+                             {
+@@ -93,6 +100,7 @@
+                     <span><i class="lg lg-down"></i> down</span>
+                     <span><i class="lg lg-path"></i> selected route</span>
+                     <span><i class="lg lg-old"></i> route before the failure</span>
++                    <span><i class="lg lg-short"></i> cheapest path for this node</span>
+                     <span class="mesh-hint">Click a node to track it. Numbers on links are relative transmit power.</span>
+                 </div>
+             </section>
+@@ -118,8 +126,27 @@
+                             }
+                             @if (_route.LivePath.Count > 0)
+                             {
+-                                <p class="mesh-sub">Current route</p>
++                                <p class="mesh-sub">Current route (spanning tree)</p>
+                                 <p class="mesh-path">@string.Join(" \u2192 ", _route.LivePath)</p>
++                                <table class="mesh-hops">
++                                    <thead><tr><th>#</th><th>From</th><th>To</th><th>Cost</th></tr></thead>
++                                    <tbody>
++                                        @for (var i = 0; i < _route.Hops.Count; i++)
++                                        {
++                                            var hop = _route.Hops[i];
++                                            <tr><td>@(i + 1)</td><td>@hop.From</td><td>@hop.To</td><td>@hop.Cost</td></tr>
++                                        }
++                                        <tr class="mesh-hops-total"><td colspan="3">Total power cost</td><td>@_route.LiveCost</td></tr>
++                                    </tbody>
++                                </table>
++                            }
++                            @if (_route.ShortestPath.Count > 0 && _route.ShortestCost < _route.LiveCost)
++                            {
++                                <p class="mesh-sub">Cheapest path for this node (cost @_route.ShortestCost)</p>
++                                <p class="mesh-path mesh-path-short">@string.Join(" \u2192 ", _route.ShortestPath)</p>
++                                <label class="mesh-check">
++                                    <input type="checkbox" checked="@_showShortest" @onchange="OnShowShortestChanged" /> Draw it on the map
++                                </label>
+                             }
+                             @if (_route.Rerouted && _route.NormalPath.Count > 0)
+                             {
+@@ -231,6 +258,11 @@
+                     <svg class="mesh-chart" viewBox="0 0 600 90" preserveAspectRatio="none" aria-hidden="true">
+                         <polyline points="@ChartPoints()" />
+                     </svg>
++                    <div class="mesh-chart-axis">
++                        <span>@_history.Points[0].Timestamp.UtcDateTime.ToString("HH:mm:ss", CultureInfo.InvariantCulture)</span>
++                        <span>min @Num(_history.Min) &middot; max @Num(_history.Max)</span>
++                        <span>@_history.Points[^1].Timestamp.UtcDateTime.ToString("HH:mm:ss", CultureInfo.InvariantCulture)</span>
++                    </div>
+                 }
+ 
+                 @if (_history.Points.Count > 0)
+@@ -268,8 +300,12 @@
+     private HistoryRangeResponse? _history;
+     private List<string> _subnets = [];
+     private Dictionary<string, (double X, double Y)> _pos = new(StringComparer.Ordinal);
++    private List<(string Name, double X, double Y)> _subnetLabels = [];
++    private HashSet<string> _downSet = new(StringComparer.Ordinal);
+     private HashSet<string> _pathEdges = [];
+     private HashSet<string> _oldPathEdges = [];
++    private HashSet<string> _shortEdges = [];
++    private bool _showShortest = true;
+ 
+     private string _query = "";
+     private string _subnet = "";
+@@ -286,7 +322,6 @@
+     protected override async Task OnInitializedAsync()
+     {
+         await RefreshAsync();
+-        _subnets = await MeshApi.GetSubnetsAsync(_cts.Token);
+         _loading = false;
+         _ = PollAsync();
+     }
+@@ -308,7 +343,7 @@
+                 await InvokeAsync(StateHasChanged);
+             }
+         }
+-        catch (OperationCanceledException)
++        catch (Exception ex) when (ex is OperationCanceledException or ObjectDisposedException)
+         {
+             // page left; stop polling
+         }
+@@ -323,6 +358,9 @@
+         }
+ 
+         _topo = topo;
++        _downSet = topo.Nodes.Where(n => n.IsDown).Select(n => n.Id).ToHashSet(StringComparer.Ordinal);
++        _subnets = topo.Nodes.Where(n => !n.IsGateway && n.Subnet is not null)
++            .Select(n => n.Subnet!).Distinct(StringComparer.Ordinal).OrderBy(x => x, StringComparer.Ordinal).ToList();
+         ComputeLayout(topo);
+     }
+ 
+@@ -346,6 +384,20 @@
+         BuildPathSets();
+     }
+ 
++    private async Task OnNodeKey(KeyboardEventArgs e, string id)
++    {
++        if (e.Key is "Enter" or " ")
++        {
++            await TrackAsync(id);
++        }
++    }
++
++    private void OnShowShortestChanged(ChangeEventArgs e)
++    {
++        _showShortest = e.Value is true;
++        BuildPathSets();
++    }
++
+     private async Task OnQueryKey(KeyboardEventArgs e)
+     {
+         if (e.Key == "Enter")
+@@ -436,28 +488,52 @@
+ 
+     // ------------------------------------------------------------ layout and drawing helpers
+ 
++    /// <summary>
++    /// Subnet-cluster layout: each subnet occupies its own arc of the circle (with a one-slot gap
++    /// between subnets) so a subnet's ring of relays reads as a group, and cross-subnet backup links
++    /// are the long chords. Large subnets alternate between two radii so labels do not collide.
++    /// </summary>
+     private void ComputeLayout(MeshTopologyResponse topo)
+     {
+-        const double cx = 380, cy = 280;
+-        var devices = topo.Nodes.Where(n => !n.IsGateway)
+-            .OrderBy(n => n.Subnet, StringComparer.Ordinal).ThenBy(n => n.Id, StringComparer.Ordinal).ToList();
+-
++        const double cx = 380, cy = 290;
+         var pos = new Dictionary<string, (double X, double Y)>(StringComparer.Ordinal);
++        var labels = new List<(string Name, double X, double Y)>();
++
+         var gateway = topo.Nodes.FirstOrDefault(n => n.IsGateway);
+         if (gateway is not null)
+         {
+             pos[gateway.Id] = (cx, cy);
+         }
+ 
+-        var twoRings = devices.Count > 24;
+-        for (var i = 0; i < devices.Count; i++)
++        var groups = topo.Nodes.Where(n => !n.IsGateway)
++            .GroupBy(n => n.Subnet ?? "")
++            .OrderBy(g => g.Key, StringComparer.Ordinal)
++            .Select(g => (Name: g.Key, Nodes: g.OrderBy(n => n.Id, StringComparer.Ordinal).ToList()))
++            .ToList();
++
++        var slots = groups.Sum(g => g.Nodes.Count) + groups.Count;
++        var step = 2 * Math.PI / Math.Max(1, slots);
++        var twoRings = groups.Any(g => g.Nodes.Count > 8);
++        var slot = 0;
++
++        foreach (var (name, nodes) in groups)
+         {
+-            var angle = -Math.PI / 2 + 2 * Math.PI * i / Math.Max(1, devices.Count);
+-            var radius = twoRings ? (i % 2 == 0 ? 235 : 150) : 205;
+-            pos[devices[i].Id] = (cx + radius * Math.Cos(angle), cy + radius * Math.Sin(angle));
++            var first = slot;
++            for (var i = 0; i < nodes.Count; i++, slot++)
++            {
++                var angle = -Math.PI / 2 + step * slot;
++                var radius = twoRings ? (i % 2 == 0 ? 240 : 160) : 205;
++                pos[nodes[i].Id] = (cx + radius * Math.Cos(angle), cy + radius * Math.Sin(angle));
++            }
++
++            var mid = -Math.PI / 2 + step * (first + (nodes.Count - 1) / 2.0);
++            var labelRadius = (twoRings ? 240 : 205) + 48;
++            labels.Add((name, cx + labelRadius * Math.Cos(mid), cy + labelRadius * Math.Sin(mid) + 4));
++            slot++; // gap between subnets
+         }
+ 
+         _pos = pos;
++        _subnetLabels = labels;
+         BuildPathSets();
+     }
+ 
+@@ -465,6 +541,9 @@
+     {
+         _pathEdges = PathKeys(_route?.LivePath);
+         _oldPathEdges = _route is { Rerouted: true } ? PathKeys(_route.NormalPath) : [];
++        _shortEdges = _showShortest && _route is { ShortestPath.Count: > 0 } && _route.ShortestCost < _route.LiveCost
++            ? PathKeys(_route.ShortestPath)
++            : [];
+     }
+ 
+     private static HashSet<string> PathKeys(IReadOnlyList<string>? path)
+@@ -486,12 +565,11 @@
+     private static string EdgeKey(string a, string b) =>
+         string.CompareOrdinal(a, b) <= 0 ? a + "|" + b : b + "|" + a;
+ 
+-    private bool IsDown(string id) => _topo?.Nodes.FirstOrDefault(n => n.Id == id)?.IsDown ?? false;
+-
+     private string EdgeClass(MeshEdgeDto edge, string key, bool touchesDown)
+     {
+         if (touchesDown) { return "mesh-edge mesh-edge-down"; }
+         if (_pathEdges.Contains(key)) { return "mesh-edge mesh-edge-path"; }
++        if (_shortEdges.Contains(key)) { return "mesh-edge mesh-edge-short"; }
+         if (_oldPathEdges.Contains(key)) { return "mesh-edge mesh-edge-old"; }
+         return edge.InMst ? "mesh-edge mesh-edge-mst" : "mesh-edge";
+     }
+@@ -509,7 +587,11 @@
+     private static string NodeTooltip(MeshNodeDto node)
+     {
+         if (node.IsGateway) { return "Gateway (sink for all telemetry)"; }
+-        var state = node.IsDown ? $"DOWN: {node.DownReason}" : node.HopsToGateway < 0 ? "stranded" : $"{node.HopsToGateway} hops to gateway via {node.NextHop}";
++        var state = node.IsDown
++            ? $"DOWN: {node.DownReason}"
++            : node.HopsToGateway < 0
++                ? "stranded"
++                : $"{node.HopsToGateway} hops, cost {node.CostToGateway}, via {node.NextHop}";
+         return $"{node.Id}\n{node.Mac}\n{state}";
+     }
+ 
+diff --git a/SmartX/SmartX.Client/wwwroot/css/app.css b/SmartX/SmartX.Client/wwwroot/css/app.css
+index 3b59c76..d94a81f 100644
+--- a/SmartX/SmartX.Client/wwwroot/css/app.css
++++ b/SmartX/SmartX.Client/wwwroot/css/app.css
+@@ -2259,7 +2259,8 @@ a.topnav-link:hover {
+ .mesh-edge { stroke: #2c3945; stroke-width: 1.2; }
+ .mesh-edge-mst { stroke: var(--green); stroke-width: 3; opacity: 0.85; }
+ .mesh-edge-down { stroke: var(--red); stroke-width: 1; stroke-dasharray: 3 5; opacity: 0.55; }
+-.mesh-edge-path { stroke: var(--accent); stroke-width: 5; opacity: 1; filter: drop-shadow(0 0 5px rgba(216, 168, 50, 0.7)); }
++.mesh-edge-path { stroke: var(--accent); stroke-width: 5; opacity: 1; stroke-dasharray: 12 8; animation: mesh-flow 0.8s linear infinite; filter: drop-shadow(0 0 5px rgba(216, 168, 50, 0.7)); }
++.mesh-edge-short { stroke: var(--blue, #4aa3ff); stroke-width: 3.5; stroke-dasharray: 2 7; stroke-linecap: round; opacity: 1; }
+ .mesh-edge-old { stroke: var(--muted); stroke-width: 3; stroke-dasharray: 7 6; opacity: 0.9; }
+ .mesh-cost { fill: var(--muted); font-size: 10px; text-anchor: middle; paint-order: stroke; stroke: var(--panel); stroke-width: 3px; }
+ .mesh-node { cursor: pointer; }
+@@ -2305,3 +2306,17 @@ a.topnav-link:hover {
+     .mesh-grid { grid-template-columns: 1fr; }
+     .mesh-hist-controls { grid-template-columns: 1fr; }
+ }
++
++@keyframes mesh-flow { to { stroke-dashoffset: -20; } }
++@media (prefers-reduced-motion: reduce) { .mesh-edge-path { animation: none; stroke-dasharray: none; } }
++.mesh-subnet { fill: var(--muted); font-size: 10px; letter-spacing: 0.08em; text-anchor: middle; text-transform: uppercase; pointer-events: none; }
++.mesh-node:focus-visible { outline: none; }
++.mesh-node:focus-visible .mesh-dot, .mesh-node:focus-visible .mesh-gw { stroke: var(--accent); stroke-width: 4; }
++.lg-short { border-color: var(--blue, #4aa3ff); border-top-style: dotted; }
++.mesh-path-short { color: var(--blue, #4aa3ff); }
++.mesh-check { display: flex; align-items: center; gap: 0.4rem; margin-top: 0.4rem; font-size: 0.72rem; color: var(--muted); cursor: pointer; }
++.mesh-hops { width: 100%; margin-top: 0.5rem; border-collapse: collapse; font-size: 0.72rem; }
++.mesh-hops th, .mesh-hops td { padding: 0.2rem 0.4rem; text-align: left; border-bottom: 1px solid var(--border); }
++.mesh-hops th { color: var(--muted); font-weight: 600; }
++.mesh-hops-total td { font-weight: 700; border-bottom: 0; }
++.mesh-chart-axis { display: flex; justify-content: space-between; font-size: 0.68rem; color: var(--muted); margin-top: 0.25rem; }
+diff --git a/SmartX/SmartX.Core/Mesh/MeshGraph.cs b/SmartX/SmartX.Core/Mesh/MeshGraph.cs
+index 2755b46..e9db5f0 100644
+--- a/SmartX/SmartX.Core/Mesh/MeshGraph.cs
++++ b/SmartX/SmartX.Core/Mesh/MeshGraph.cs
+@@ -16,6 +16,16 @@ public sealed record MstResult(
+     IReadOnlyDictionary<string, string> ParentOf,
+     IReadOnlyDictionary<string, int> HopsToRoot);
+ 
++/// <summary>Cheapest-path tree from the gateway (Dijkstra): the lowest-cost route for every individual node.</summary>
++public sealed record ShortestPathResult(
++    string Root,
++    IReadOnlyDictionary<string, string> ParentOf,
++    IReadOnlyDictionary<string, int> Distance,
++    IReadOnlyDictionary<string, int> HopsToRoot);
++
++/// <summary>One hop of a route with its transmit cost.</summary>
++public sealed record MeshHop(string From, string To, int Cost);
++
+ public enum TraversalKind
+ {
+     Bfs,
+@@ -312,6 +322,87 @@ public sealed class MeshGraph
+         return total;
+     }
+ 
++    /// <summary>
++    /// Dijkstra's algorithm from the gateway on the live graph, using the same min-heap as Prim's.
++    /// Where the MST minimises the total cost of the whole network, this minimises each sensor's own
++    /// cost to the gateway, so the two can differ; the page shows both so the trade-off is visible.
++    /// O(E log V).
++    /// </summary>
++    public ShortestPathResult ShortestPaths()
++    {
++        var distance = new Dictionary<string, int>(StringComparer.Ordinal) { [GatewayId] = 0 };
++        var parent = new Dictionary<string, string>(StringComparer.Ordinal);
++        var hops = new Dictionary<string, int>(StringComparer.Ordinal) { [GatewayId] = 0 };
++        var settled = new HashSet<string>(StringComparer.Ordinal);
++
++        var heap = new MinHeap<string, (int Distance, string Node)>(
++            Comparer<(int Distance, string Node)>.Create((x, y) =>
++            {
++                var c = x.Distance.CompareTo(y.Distance);
++                return c != 0 ? c : string.CompareOrdinal(x.Node, y.Node);
++            }));
++        heap.Enqueue(GatewayId, (0, GatewayId));
++
++        while (heap.TryDequeue(out var node, out _))
++        {
++            if (!settled.Add(node))
++            {
++                continue; // stale heap entry: a cheaper one already settled this node
++            }
++
++            foreach (var edge in OrderedLinks(node))
++            {
++                var next = edge.Other(node);
++                if (IsDown(next) || settled.Contains(next))
++                {
++                    continue;
++                }
++
++                var candidate = distance[node] + edge.Cost;
++                if (!distance.TryGetValue(next, out var known) || candidate < known)
++                {
++                    distance[next] = candidate;
++                    parent[next] = node;
++                    hops[next] = hops[node] + 1;
++                    heap.Enqueue(next, (candidate, next));
++                }
++            }
++        }
++
++        return new ShortestPathResult(GatewayId, parent, distance, hops);
++    }
++
++    public static IReadOnlyList<string> PathToRoot(ShortestPathResult tree, string node)
++    {
++        if (node != tree.Root && !tree.ParentOf.ContainsKey(node))
++        {
++            return [];
++        }
++
++        var path = new List<string> { node };
++        var current = node;
++        while (current != tree.Root)
++        {
++            current = tree.ParentOf[current];
++            path.Add(current);
++        }
++
++        return path;
++    }
++
++    /// <summary>Splits a route into hops, each with its link cost.</summary>
++    public IReadOnlyList<MeshHop> HopsOf(IReadOnlyList<string> path)
++    {
++        var hops = new List<MeshHop>();
++        for (var i = 0; i + 1 < path.Count; i++)
++        {
++            var edge = _adjacency[path[i]].FirstOrDefault(e => e.Other(path[i]) == path[i + 1]);
++            hops.Add(new MeshHop(path[i], path[i + 1], edge?.Cost ?? 0));
++        }
++
++        return hops;
++    }
++
+     /// <summary>The route a packet takes from a node to the gateway along an MST: its chain of parents.</summary>
+     public static IReadOnlyList<string> PathToRoot(MstResult mst, string node)
+     {
+diff --git a/SmartX/SmartX.Core/Mesh/MeshModels.cs b/SmartX/SmartX.Core/Mesh/MeshModels.cs
+index d3fb8c6..900eaa5 100644
+--- a/SmartX/SmartX.Core/Mesh/MeshModels.cs
++++ b/SmartX/SmartX.Core/Mesh/MeshModels.cs
+@@ -13,7 +13,8 @@ public sealed record MeshNodeDto(
+     bool IsDown,
+     string? DownReason,
+     int HopsToGateway,
+-    string? NextHop);
++    string? NextHop,
++    int CostToGateway);
+ 
+ public sealed record MeshEdgeDto(string A, string B, int Cost, bool InMst);
+ 
+@@ -38,7 +39,10 @@ public sealed record MeshRouteResponse(
+     IReadOnlyList<string> LivePath,
+     int LiveCost,
+     bool Rerouted,
+-    IReadOnlyList<string> AlternativeHops);
++    IReadOnlyList<string> AlternativeHops,
++    IReadOnlyList<MeshHop> Hops,
++    IReadOnlyList<string> ShortestPath,
++    int ShortestCost);
+ 
+ public sealed record MeshDetour(
+     string DeviceId,
