@@ -55,12 +55,12 @@
             <section class="panel mesh-map-panel">
                 <p class="panel-title">Live mesh <span class="cs-count">thick green = minimum spanning tree</span></p>
 
-                <svg class="mesh-svg" viewBox="0 0 760 560" role="img" aria-label="Mesh network graph">
+                <svg class="mesh-svg" viewBox="0 0 760 580" role="img" aria-label="Mesh network graph">
                     @foreach (var edge in _topo.Edges)
                     {
                         if (!_pos.TryGetValue(edge.A, out var a) || !_pos.TryGetValue(edge.B, out var b)) { continue; }
                         var key = EdgeKey(edge.A, edge.B);
-                        var touchesDown = IsDown(edge.A) || IsDown(edge.B);
+                        var touchesDown = _downSet.Contains(edge.A) || _downSet.Contains(edge.B);
                         <line class="@EdgeClass(edge, key, touchesDown)" x1="@F(a.X)" y1="@F(a.Y)" x2="@F(b.X)" y2="@F(b.Y)" />
                         @if (_topo.Nodes.Count <= 30 && !touchesDown)
                         {
@@ -68,11 +68,18 @@
                         }
                     }
 
+                    @foreach (var label in _subnetLabels)
+                    {
+                        <g><text class="mesh-subnet" x="@F(label.X)" y="@F(label.Y)">@label.Name</text></g>
+                    }
+
                     @foreach (var node in _topo.Nodes)
                     {
                         if (!_pos.TryGetValue(node.Id, out var p)) { continue; }
                         var id = node.Id;
-                        <g class="@NodeClass(node)" transform="translate(@F(p.X) @F(p.Y))" @onclick="() => TrackAsync(id)">
+                        <g class="@NodeClass(node)" transform="translate(@F(p.X) @F(p.Y))" role="button" tabindex="0"
+                           aria-label="@NodeTooltip(node).Replace("\n", ", ")"
+                           @onclick="() => TrackAsync(id)" @onkeydown="e => OnNodeKey(e, id)">
                             <title>@NodeTooltip(node)</title>
                             @if (node.IsGateway)
                             {
@@ -93,6 +100,7 @@
                     <span><i class="lg lg-down"></i> down</span>
                     <span><i class="lg lg-path"></i> selected route</span>
                     <span><i class="lg lg-old"></i> route before the failure</span>
+                    <span><i class="lg lg-short"></i> cheapest path for this node</span>
                     <span class="mesh-hint">Click a node to track it. Numbers on links are relative transmit power.</span>
                 </div>
             </section>
@@ -118,8 +126,27 @@
                             }
                             @if (_route.LivePath.Count > 0)
                             {
-                                <p class="mesh-sub">Current route</p>
+                                <p class="mesh-sub">Current route (spanning tree)</p>
                                 <p class="mesh-path">@string.Join(" \u2192 ", _route.LivePath)</p>
+                                <table class="mesh-hops">
+                                    <thead><tr><th>#</th><th>From</th><th>To</th><th>Cost</th></tr></thead>
+                                    <tbody>
+                                        @for (var i = 0; i < _route.Hops.Count; i++)
+                                        {
+                                            var hop = _route.Hops[i];
+                                            <tr><td>@(i + 1)</td><td>@hop.From</td><td>@hop.To</td><td>@hop.Cost</td></tr>
+                                        }
+                                        <tr class="mesh-hops-total"><td colspan="3">Total power cost</td><td>@_route.LiveCost</td></tr>
+                                    </tbody>
+                                </table>
+                            }
+                            @if (_route.ShortestPath.Count > 0 && _route.ShortestCost < _route.LiveCost)
+                            {
+                                <p class="mesh-sub">Cheapest path for this node (cost @_route.ShortestCost)</p>
+                                <p class="mesh-path mesh-path-short">@string.Join(" \u2192 ", _route.ShortestPath)</p>
+                                <label class="mesh-check">
+                                    <input type="checkbox" checked="@_showShortest" @onchange="OnShowShortestChanged" /> Draw it on the map
+                                </label>
                             }
                             @if (_route.Rerouted && _route.NormalPath.Count > 0)
                             {
@@ -231,6 +258,11 @@
                     <svg class="mesh-chart" viewBox="0 0 600 90" preserveAspectRatio="none" aria-hidden="true">
                         <polyline points="@ChartPoints()" />
                     </svg>
+                    <div class="mesh-chart-axis">
+                        <span>@_history.Points[0].Timestamp.UtcDateTime.ToString("HH:mm:ss", CultureInfo.InvariantCulture)</span>
+                        <span>min @Num(_history.Min) &middot; max @Num(_history.Max)</span>
+                        <span>@_history.Points[^1].Timestamp.UtcDateTime.ToString("HH:mm:ss", CultureInfo.InvariantCulture)</span>
+                    </div>
                 }
 
                 @if (_history.Points.Count > 0)
@@ -268,8 +300,12 @@
     private HistoryRangeResponse? _history;
     private List<string> _subnets = [];
     private Dictionary<string, (double X, double Y)> _pos = new(StringComparer.Ordinal);
+    private List<(string Name, double X, double Y)> _subnetLabels = [];
+    private HashSet<string> _downSet = new(StringComparer.Ordinal);
     private HashSet<string> _pathEdges = [];
     private HashSet<string> _oldPathEdges = [];
+    private HashSet<string> _shortEdges = [];
+    private bool _showShortest = true;
 
     private string _query = "";
     private string _subnet = "";
@@ -286,7 +322,6 @@
     protected override async Task OnInitializedAsync()
     {
         await RefreshAsync();
-        _subnets = await MeshApi.GetSubnetsAsync(_cts.Token);
         _loading = false;
         _ = PollAsync();
     }
@@ -308,7 +343,7 @@
                 await InvokeAsync(StateHasChanged);
             }
         }
-        catch (OperationCanceledException)
+        catch (Exception ex) when (ex is OperationCanceledException or ObjectDisposedException)
         {
             // page left; stop polling
         }
@@ -323,6 +358,9 @@
         }
 
         _topo = topo;
+        _downSet = topo.Nodes.Where(n => n.IsDown).Select(n => n.Id).ToHashSet(StringComparer.Ordinal);
+        _subnets = topo.Nodes.Where(n => !n.IsGateway && n.Subnet is not null)
+            .Select(n => n.Subnet!).Distinct(StringComparer.Ordinal).OrderBy(x => x, StringComparer.Ordinal).ToList();
         ComputeLayout(topo);
     }
 
@@ -343,6 +381,20 @@
         _query = idOrMac;
         _histQuery = idOrMac;
         _route = await MeshApi.GetRouteAsync(idOrMac.Trim(), _cts.Token);
+        BuildPathSets();
+    }
+
+    private async Task OnNodeKey(KeyboardEventArgs e, string id)
+    {
+        if (e.Key is "Enter" or " ")
+        {
+            await TrackAsync(id);
+        }
+    }
+
+    private void OnShowShortestChanged(ChangeEventArgs e)
+    {
+        _showShortest = e.Value is true;
         BuildPathSets();
     }
 
@@ -436,28 +488,52 @@
 
     // ------------------------------------------------------------ layout and drawing helpers
 
+    /// <summary>
+    /// Subnet-cluster layout: each subnet occupies its own arc of the circle (with a one-slot gap
+    /// between subnets) so a subnet's ring of relays reads as a group, and cross-subnet backup links
+    /// are the long chords. Large subnets alternate between two radii so labels do not collide.
+    /// </summary>
     private void ComputeLayout(MeshTopologyResponse topo)
     {
-        const double cx = 380, cy = 280;
-        var devices = topo.Nodes.Where(n => !n.IsGateway)
-            .OrderBy(n => n.Subnet, StringComparer.Ordinal).ThenBy(n => n.Id, StringComparer.Ordinal).ToList();
-
+        const double cx = 380, cy = 290;
         var pos = new Dictionary<string, (double X, double Y)>(StringComparer.Ordinal);
+        var labels = new List<(string Name, double X, double Y)>();
+
         var gateway = topo.Nodes.FirstOrDefault(n => n.IsGateway);
         if (gateway is not null)
         {
             pos[gateway.Id] = (cx, cy);
         }
 
-        var twoRings = devices.Count > 24;
-        for (var i = 0; i < devices.Count; i++)
+        var groups = topo.Nodes.Where(n => !n.IsGateway)
+            .GroupBy(n => n.Subnet ?? "")
+            .OrderBy(g => g.Key, StringComparer.Ordinal)
+            .Select(g => (Name: g.Key, Nodes: g.OrderBy(n => n.Id, StringComparer.Ordinal).ToList()))
+            .ToList();
+
+        var slots = groups.Sum(g => g.Nodes.Count) + groups.Count;
+        var step = 2 * Math.PI / Math.Max(1, slots);
+        var twoRings = groups.Any(g => g.Nodes.Count > 8);
+        var slot = 0;
+
+        foreach (var (name, nodes) in groups)
         {
-            var angle = -Math.PI / 2 + 2 * Math.PI * i / Math.Max(1, devices.Count);
-            var radius = twoRings ? (i % 2 == 0 ? 235 : 150) : 205;
-            pos[devices[i].Id] = (cx + radius * Math.Cos(angle), cy + radius * Math.Sin(angle));
+            var first = slot;
+            for (var i = 0; i < nodes.Count; i++, slot++)
+            {
+                var angle = -Math.PI / 2 + step * slot;
+                var radius = twoRings ? (i % 2 == 0 ? 240 : 160) : 205;
+                pos[nodes[i].Id] = (cx + radius * Math.Cos(angle), cy + radius * Math.Sin(angle));
+            }
+
+            var mid = -Math.PI / 2 + step * (first + (nodes.Count - 1) / 2.0);
+            var labelRadius = (twoRings ? 240 : 205) + 48;
+            labels.Add((name, cx + labelRadius * Math.Cos(mid), cy + labelRadius * Math.Sin(mid) + 4));
+            slot++; // gap between subnets
         }
 
         _pos = pos;
+        _subnetLabels = labels;
         BuildPathSets();
     }
 
@@ -465,6 +541,9 @@
     {
         _pathEdges = PathKeys(_route?.LivePath);
         _oldPathEdges = _route is { Rerouted: true } ? PathKeys(_route.NormalPath) : [];
+        _shortEdges = _showShortest && _route is { ShortestPath.Count: > 0 } && _route.ShortestCost < _route.LiveCost
+            ? PathKeys(_route.ShortestPath)
+            : [];
     }
 
     private static HashSet<string> PathKeys(IReadOnlyList<string>? path)
@@ -486,12 +565,11 @@
     private static string EdgeKey(string a, string b) =>
         string.CompareOrdinal(a, b) <= 0 ? a + "|" + b : b + "|" + a;
 
-    private bool IsDown(string id) => _topo?.Nodes.FirstOrDefault(n => n.Id == id)?.IsDown ?? false;
-
     private string EdgeClass(MeshEdgeDto edge, string key, bool touchesDown)
     {
         if (touchesDown) { return "mesh-edge mesh-edge-down"; }
         if (_pathEdges.Contains(key)) { return "mesh-edge mesh-edge-path"; }
+        if (_shortEdges.Contains(key)) { return "mesh-edge mesh-edge-short"; }
         if (_oldPathEdges.Contains(key)) { return "mesh-edge mesh-edge-old"; }
         return edge.InMst ? "mesh-edge mesh-edge-mst" : "mesh-edge";
     }
@@ -509,7 +587,11 @@
     private static string NodeTooltip(MeshNodeDto node)
     {
         if (node.IsGateway) { return "Gateway (sink for all telemetry)"; }
-        var state = node.IsDown ? $"DOWN: {node.DownReason}" : node.HopsToGateway < 0 ? "stranded" : $"{node.HopsToGateway} hops to gateway via {node.NextHop}";
+        var state = node.IsDown
+            ? $"DOWN: {node.DownReason}"
+            : node.HopsToGateway < 0
+                ? "stranded"
+                : $"{node.HopsToGateway} hops, cost {node.CostToGateway}, via {node.NextHop}";
         return $"{node.Id}\n{node.Mac}\n{state}";
     }
 

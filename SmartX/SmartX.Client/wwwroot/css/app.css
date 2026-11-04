@@ -2259,7 +2259,8 @@ a.topnav-link:hover {
 .mesh-edge { stroke: #2c3945; stroke-width: 1.2; }
 .mesh-edge-mst { stroke: var(--green); stroke-width: 3; opacity: 0.85; }
 .mesh-edge-down { stroke: var(--red); stroke-width: 1; stroke-dasharray: 3 5; opacity: 0.55; }
-.mesh-edge-path { stroke: var(--accent); stroke-width: 5; opacity: 1; filter: drop-shadow(0 0 5px rgba(216, 168, 50, 0.7)); }
+.mesh-edge-path { stroke: var(--accent); stroke-width: 5; opacity: 1; stroke-dasharray: 12 8; animation: mesh-flow 0.8s linear infinite; filter: drop-shadow(0 0 5px rgba(216, 168, 50, 0.7)); }
+.mesh-edge-short { stroke: var(--blue, #4aa3ff); stroke-width: 3.5; stroke-dasharray: 2 7; stroke-linecap: round; opacity: 1; }
 .mesh-edge-old { stroke: var(--muted); stroke-width: 3; stroke-dasharray: 7 6; opacity: 0.9; }
 .mesh-cost { fill: var(--muted); font-size: 10px; text-anchor: middle; paint-order: stroke; stroke: var(--panel); stroke-width: 3px; }
 .mesh-node { cursor: pointer; }
@@ -2305,3 +2306,17 @@ a.topnav-link:hover {
     .mesh-grid { grid-template-columns: 1fr; }
     .mesh-hist-controls { grid-template-columns: 1fr; }
 }
+
+@keyframes mesh-flow { to { stroke-dashoffset: -20; } }
+@media (prefers-reduced-motion: reduce) { .mesh-edge-path { animation: none; stroke-dasharray: none; } }
+.mesh-subnet { fill: var(--muted); font-size: 10px; letter-spacing: 0.08em; text-anchor: middle; text-transform: uppercase; pointer-events: none; }
+.mesh-node:focus-visible { outline: none; }
+.mesh-node:focus-visible .mesh-dot, .mesh-node:focus-visible .mesh-gw { stroke: var(--accent); stroke-width: 4; }
+.lg-short { border-color: var(--blue, #4aa3ff); border-top-style: dotted; }
+.mesh-path-short { color: var(--blue, #4aa3ff); }
+.mesh-check { display: flex; align-items: center; gap: 0.4rem; margin-top: 0.4rem; font-size: 0.72rem; color: var(--muted); cursor: pointer; }
+.mesh-hops { width: 100%; margin-top: 0.5rem; border-collapse: collapse; font-size: 0.72rem; }
+.mesh-hops th, .mesh-hops td { padding: 0.2rem 0.4rem; text-align: left; border-bottom: 1px solid var(--border); }
+.mesh-hops th { color: var(--muted); font-weight: 600; }
+.mesh-hops-total td { font-weight: 700; border-bottom: 0; }
+.mesh-chart-axis { display: flex; justify-content: space-between; font-size: 0.68rem; color: var(--muted); margin-top: 0.25rem; }
