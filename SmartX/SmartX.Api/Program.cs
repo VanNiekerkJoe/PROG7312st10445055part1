@@ -71,11 +71,14 @@ builder.Services.AddSingleton<AttachmentEncryptionService>();
 // Part 2: real-time ingestion pipeline and command stream.
 builder.Services.AddSingleton<TelemetryIngestQueue>();      // Queue<T> + PriorityQueue
 builder.Services.AddSingleton<DeviceStateStore>();          // Dictionary keyed by MAC
-builder.Services.AddSingleton(_ => new SortedHistoryLog()); // SortedDictionary by timestamp
+builder.Services.AddSingleton(_ => new SortedHistoryLog());          // AVL tree by timestamp (Part 3)
 builder.Services.AddSingleton<ActiveAlertSet>();            // HashSet of active alerts
 builder.Services.AddSingleton<CommandHistory>();            // Stack<T> for undo
 builder.Services.AddSingleton<ActionPatternEngine>();       // predictive suggestions
 builder.Services.AddSingleton<CommandService>();
+
+// Part 3: mesh graph, routing and historical range queries.
+builder.Services.AddSingleton<MeshTopologyService>();
 builder.Services.AddSingleton<IngestProcessor>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<IngestProcessor>());
 
@@ -93,6 +96,7 @@ app.MapAuthEndpoints();
 app.MapSensorEndpoints();
 app.MapTelemetryEndpoints();
 app.MapCommandEndpoints();
+app.MapMeshEndpoints();
 app.MapHub<TelemetryHub>("/hubs/telemetry").RequireAuthorization();
 app.MapHub<CommandHub>("/hubs/commands").RequireAuthorization();
 
