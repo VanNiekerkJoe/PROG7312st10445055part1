@@ -182,6 +182,68 @@ public class MeshGraphTests
     }
 
     [Fact]
+    public void ShortestPath_CanBeCheaperForOneNodeThanItsSpanningTreeRoute()
+    {
+        // G-A 2, G-B 2, A-B 1: the MST takes G-A then A-B (total 3), so B routes via A at cost 3,
+        // but B's own cheapest path is the direct link at cost 2.
+        var g = new MeshGraph("G");
+        g.AddEdge("G", "A", 2);
+        g.AddEdge("G", "B", 2);
+        g.AddEdge("A", "B", 1);
+
+        var mst = g.Prim();
+        var shortest = g.ShortestPaths();
+
+        Assert.Equal(3, g.PathCost(MeshGraph.PathToRoot(mst, "B")));
+        Assert.Equal(2, shortest.Distance["B"]);
+        Assert.Equal(new[] { "B", "G" }, MeshGraph.PathToRoot(shortest, "B"));
+        Assert.Equal(3, mst.TotalCost);
+    }
+
+    [Fact]
+    public void ShortestPath_NeverCostsMoreThanTheTreeRoute_AndSkipsDownNodes()
+    {
+        var random = new Random(11);
+        for (var trial = 0; trial < 100; trial++)
+        {
+            var g = new MeshGraph("G");
+            var n = 5 + random.Next(10);
+            for (var i = 1; i < n; i++)
+            {
+                g.AddEdge(i == 1 ? "G" : "N" + random.Next(1, i), "N" + i, 1 + random.Next(9));
+            }
+
+            for (var extra = 0; extra < n; extra++)
+            {
+                g.AddEdge("N" + random.Next(1, n), random.Next(2) == 0 ? "G" : "N" + random.Next(1, n), 1 + random.Next(9));
+            }
+
+            g.SetDown("N" + random.Next(1, n), true);
+            var mst = g.Prim();
+            var shortest = g.ShortestPaths();
+
+            Assert.Equal(mst.ParentOf.Count, shortest.ParentOf.Count);
+            foreach (var node in mst.ParentOf.Keys)
+            {
+                Assert.True(shortest.Distance[node] <= g.PathCost(MeshGraph.PathToRoot(mst, node)));
+                Assert.Equal(shortest.Distance[node], g.PathCost(MeshGraph.PathToRoot(shortest, node)));
+            }
+        }
+    }
+
+    [Fact]
+    public void HopsOf_ListsEachLinkWithItsCost()
+    {
+        var g = SampleMesh();
+
+        var hops = g.HopsOf(new[] { "B", "A", "G" });
+
+        Assert.Equal(2, hops.Count);
+        Assert.Equal(2, hops[0].Cost);
+        Assert.Equal("G", hops[1].To);
+    }
+
+    [Fact]
     public void Connectivity_ReportsDownAndStrandedNodes()
     {
         var g = new MeshGraph("G");
@@ -253,6 +315,8 @@ public class MeshTopologyServiceTests
         Assert.True(healthy.Found);
         Assert.False(healthy.Rerouted);
         Assert.Equal("GATEWAY", healthy.LivePath[^1]);
+        Assert.Equal(healthy.LivePath.Count - 1, healthy.Hops.Count);
+        Assert.True(healthy.ShortestCost <= healthy.LiveCost);
 
         var uplink = healthy.LivePath[^2];
         Assert.True(service.Fail(uplink));
