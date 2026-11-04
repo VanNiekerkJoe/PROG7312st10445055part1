@@ -13,7 +13,8 @@ public sealed record MeshNodeDto(
     bool IsDown,
     string? DownReason,
     int HopsToGateway,
-    string? NextHop);
+    string? NextHop,
+    int CostToGateway);
 
 public sealed record MeshEdgeDto(string A, string B, int Cost, bool InMst);
 
@@ -38,7 +39,10 @@ public sealed record MeshRouteResponse(
     IReadOnlyList<string> LivePath,
     int LiveCost,
     bool Rerouted,
-    IReadOnlyList<string> AlternativeHops);
+    IReadOnlyList<string> AlternativeHops,
+    IReadOnlyList<MeshHop> Hops,
+    IReadOnlyList<string> ShortestPath,
+    int ShortestCost);
 
 public sealed record MeshDetour(
     string DeviceId,

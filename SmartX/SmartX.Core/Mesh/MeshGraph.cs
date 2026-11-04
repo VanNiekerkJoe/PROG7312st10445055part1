@@ -16,6 +16,16 @@ public sealed record MstResult(
     IReadOnlyDictionary<string, string> ParentOf,
     IReadOnlyDictionary<string, int> HopsToRoot);
 
+/// <summary>Cheapest-path tree from the gateway (Dijkstra): the lowest-cost route for every individual node.</summary>
+public sealed record ShortestPathResult(
+    string Root,
+    IReadOnlyDictionary<string, string> ParentOf,
+    IReadOnlyDictionary<string, int> Distance,
+    IReadOnlyDictionary<string, int> HopsToRoot);
+
+/// <summary>One hop of a route with its transmit cost.</summary>
+public sealed record MeshHop(string From, string To, int Cost);
+
 public enum TraversalKind
 {
     Bfs,
@@ -310,6 +320,87 @@ public sealed class MeshGraph
 
         chosenEdges = chosen;
         return total;
+    }
+
+    /// <summary>
+    /// Dijkstra's algorithm from the gateway on the live graph, using the same min-heap as Prim's.
+    /// Where the MST minimises the total cost of the whole network, this minimises each sensor's own
+    /// cost to the gateway, so the two can differ; the page shows both so the trade-off is visible.
+    /// O(E log V).
+    /// </summary>
+    public ShortestPathResult ShortestPaths()
+    {
+        var distance = new Dictionary<string, int>(StringComparer.Ordinal) { [GatewayId] = 0 };
+        var parent = new Dictionary<string, string>(StringComparer.Ordinal);
+        var hops = new Dictionary<string, int>(StringComparer.Ordinal) { [GatewayId] = 0 };
+        var settled = new HashSet<string>(StringComparer.Ordinal);
+
+        var heap = new MinHeap<string, (int Distance, string Node)>(
+            Comparer<(int Distance, string Node)>.Create((x, y) =>
+            {
+                var c = x.Distance.CompareTo(y.Distance);
+                return c != 0 ? c : string.CompareOrdinal(x.Node, y.Node);
+            }));
+        heap.Enqueue(GatewayId, (0, GatewayId));
+
+        while (heap.TryDequeue(out var node, out _))
+        {
+            if (!settled.Add(node))
+            {
+                continue; // stale heap entry: a cheaper one already settled this node
+            }
+
+            foreach (var edge in OrderedLinks(node))
+            {
+                var next = edge.Other(node);
+                if (IsDown(next) || settled.Contains(next))
+                {
+                    continue;
+                }
+
+                var candidate = distance[node] + edge.Cost;
+                if (!distance.TryGetValue(next, out var known) || candidate < known)
+                {
+                    distance[next] = candidate;
+                    parent[next] = node;
+                    hops[next] = hops[node] + 1;
+                    heap.Enqueue(next, (candidate, next));
+                }
+            }
+        }
+
+        return new ShortestPathResult(GatewayId, parent, distance, hops);
+    }
+
+    public static IReadOnlyList<string> PathToRoot(ShortestPathResult tree, string node)
+    {
+        if (node != tree.Root && !tree.ParentOf.ContainsKey(node))
+        {
+            return [];
+        }
+
+        var path = new List<string> { node };
+        var current = node;
+        while (current != tree.Root)
+        {
+            current = tree.ParentOf[current];
+            path.Add(current);
+        }
+
+        return path;
+    }
+
+    /// <summary>Splits a route into hops, each with its link cost.</summary>
+    public IReadOnlyList<MeshHop> HopsOf(IReadOnlyList<string> path)
+    {
+        var hops = new List<MeshHop>();
+        for (var i = 0; i + 1 < path.Count; i++)
+        {
+            var edge = _adjacency[path[i]].FirstOrDefault(e => e.Other(path[i]) == path[i + 1]);
+            hops.Add(new MeshHop(path[i], path[i + 1], edge?.Cost ?? 0));
+        }
+
+        return hops;
     }
 
     /// <summary>The route a packet takes from a node to the gateway along an MST: its chain of parents.</summary>
