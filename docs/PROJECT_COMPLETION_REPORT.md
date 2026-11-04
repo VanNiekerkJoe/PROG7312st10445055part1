@@ -32,7 +32,7 @@ Packets enter through `POST /api/telemetry/ingest`, are classified at the door (
 
 **3.4 Proving the spanning tree is minimal.** Hand-checking one small graph is not proof. Prim's algorithm (heap-based) and Kruskal's algorithm (union-find) find the minimum by different routes, so the app computes both and shows whether they agree; a unit test compares them on 100 randomly generated meshes. Writing my own `MinHeap` instead of using `PriorityQueue` also meant the sift-up and sift-down logic had to be correct, which the heap test (sorted dequeue order) checks.
 
-**3.5 A tree route is not a shortest path.** An MST minimises total network cost, not each sensor's own cost to the gateway. I kept the MST because the brief asks for it explicitly, documented the distinction, and listed Dijkstra over the same adjacency list as future work.
+**3.5 A tree route is not a shortest path.** An MST minimises total network cost, not each sensor's own cost to the gateway. I kept the MST because the brief asks for it explicitly, and added Dijkstra over the same adjacency list and min-heap so the Route tracker shows both a node's tree route and its own cheapest path. A unit test builds the smallest graph where they differ, and a random-mesh test checks that the cheapest path never costs more than the tree route.
 
 **3.6 Integrating the C# backend with the Blazor frontend.** The mesh page needed an SVG drawing that Blazor re-renders every three seconds. Two issues came up. First, the Razor compiler treats `<text>` as its own directive, so SVG labels placed directly inside a code block failed to compile; wrapping each in a `<g>` fixed it. Second, number formatting in a South African culture can use a decimal comma, which silently breaks SVG coordinates, so every coordinate goes through a helper that formats with the invariant culture. I also kept the page's refresh loop cancellable (`CancellationTokenSource` plus `PeriodicTimer`) so it stops when the user navigates away, which matters because Parts 1 and 2 share one long-lived SignalR connection.
 
@@ -57,4 +57,4 @@ Packets enter through `POST /api/telemetry/ingest`, are classified at the door (
 
 ## 6. Future work
 
-Real link quality (RSSI) as edge cost; Dijkstra for per-node shortest paths; persistent time-series storage; MQTT ingestion; horizontal scale-out. See *Technology recommendations*.
+Real link quality (RSSI) as edge cost; persistent time-series storage; MQTT ingestion; horizontal scale-out. See *Technology recommendations*.

@@ -50,11 +50,11 @@ Each recommendation names the exact .NET integration point in this codebase, the
 
 **Trade-off.** Extra containers locally; metric cardinality must be kept low (do not label metrics by MAC).
 
-## 7. Real link quality and shortest-path routing (algorithmic)
+## 7. Real link quality for routing (algorithmic)
 
-**What.** Replace the simulated link costs with RSSI or packet-loss reports from real ESP-NOW or Thread neighbours, and add Dijkstra to compute each node's cheapest path alongside the MST.
+**What.** Replace the simulated link costs with RSSI or packet-loss reports from real ESP-NOW or Thread neighbours, so the existing Prim and Dijkstra routing run on measured costs instead of simulated ones.
 
-**Why it fits.** The MST minimises total network power, but an individual sensor's tree route is not guaranteed to be its cheapest. Dijkstra gives per-node latency and cost, and the existing `MinHeap` and adjacency list are reused unchanged.
+**Why it fits.** The graph, MST and shortest-path code only need a cost per link, so swapping the simulated cost for a measured one changes `MeshTopologyBuilder` and nothing else.
 
 **Trade-off.** Real radio costs change constantly, so the graph needs incremental updates and hysteresis to avoid route flapping.
 

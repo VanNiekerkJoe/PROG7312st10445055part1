@@ -448,7 +448,7 @@ dotnet test SmartX.Api.Tests
 | `SensorRegistryTests` / `PipelineStructuresTests` | MAC lookup and sync, duplicate-alert suppression, sorted history ordering and capacity |
 | `ActionPatternEngineTests` | Learned, rule-based and watch-list paths; minimum support; smoothed confidence; **decay on an injected clock** (evidence halves, then is pruned); watch-list fades; repeated searches credited once; weak runner-up hidden; demo data labelled and idempotent; removed devices purged; prefix-only search matching; stable ordering |
 | `CoreDomainTests`, `DeploymentTreeValidatorTests` | Part 1: operator overloads, jagged-array batching, recursive tree validation |
-| `Part3MeshTests` | Part 3: AVL balance on sorted input, range-query correctness and nodes visited, delete rebalancing, min-heap ordering, Prim equals Kruskal (fixed example and 100 random meshes), BFS versus DFS order, healing around a failed node, stranded-node detection, deterministic topology, route lookup by MAC, history range through the service |
+| `Part3MeshTests` | Part 3: AVL balance on sorted input, range-query correctness and nodes visited, delete rebalancing, min-heap ordering, Prim equals Kruskal (fixed example and 100 random meshes), BFS versus DFS order, healing around a failed node, Dijkstra versus tree-route cost (fixed example and 100 random meshes), hop breakdown, stranded-node detection, deterministic topology, route lookup by MAC, history range through the service |
 
 ---
 
@@ -512,7 +512,7 @@ Part 3 adds the third menu item, **Mesh topology** (`/mesh`), and finishes the S
 | Panel | What it does | Data structure behind it |
 |---|---|---|
 | **Live mesh** | Draws the gateway and every sensor with their wireless links. Thick green links are the minimum spanning tree. Down nodes turn red and their links dim. Click a node to track it. Refreshes every 3 seconds. | Graph, Prim's algorithm |
-| **Route tracker** | Type a MAC address or device ID. Shows the hop-by-hop route to the gateway, its power cost, and (after a failure) the old route struck through next to the new one. **Fail node** and **Restore** simulate outages. | Graph, MST parent chain |
+| **Route tracker** | Type a MAC address or device ID. Shows the route to the gateway as a hop-by-hop cost table, and (after a failure) the old route struck through next to the new one. When the node's own cheapest path costs less than its spanning-tree route, that path is listed and can be drawn on the map as a dotted blue line. **Fail node** and **Restore** simulate outages. | Graph, MST parent chain, Dijkstra |
 | **Reachability** | Pick the whole network or one subnet (sub-zone) and BFS or DFS. Lists connected, down and stranded devices, and for every affected device the new path ("where to hop"). | BFS, DFS |
 | **Telemetry history** | Pick a sensor and a UTC time window. Returns the readings, min / average / max, a chart, and how many tree nodes the query visited out of how many are stored. **Backfill demo data** adds 1,500 timestamped readings over six hours. | AVL tree |
 
@@ -631,6 +631,20 @@ Total time is O(E log V). Because the tree is rooted at the gateway, every senso
 
 **Kruskal's algorithm** is implemented as an independent check (`KruskalTotalCost`): sort all live links by cost and add each one unless a union-find structure (path halving plus union by size) says it would close a loop. The Live mesh page shows "Prim and Kruskal agree", and a unit test compares the two on 100 random meshes.
 
+**Dijkstra's algorithm** (`ShortestPaths`) runs on the same adjacency list and the same `MinHeap`, from the gateway, and records each node's cheapest total cost and parent. Where Prim's minimises the total cost of the *whole network*, Dijkstra minimises *each sensor's own* cost to the gateway, so for some nodes the two routes differ. The Route tracker shows both so the trade-off is visible:
+
+```csharp
+var candidate = distance[node] + edge.Cost;
+if (!distance.TryGetValue(next, out var known) || candidate < known)
+{
+    distance[next] = candidate;      // found a cheaper way to reach `next`
+    parent[next]   = node;
+    heap.Enqueue(next, (candidate, next));
+}
+```
+
+A unit test builds the smallest case where they differ (G-A 2, G-B 2, A-B 1: the spanning tree routes B through A at cost 3, but B's direct link costs 2), and another checks on 100 random meshes that a node's shortest-path cost never exceeds its tree-route cost.
+
 ### 16.6 Demo script for the marker
 
 1. Start the API, client and simulator ([section 4](#4-prerequisites-build-and-run)), sign in, and open **Mesh topology**.
@@ -645,7 +659,7 @@ Total time is O(E log V). Because the tree is rooted at the gateway, every senso
 
 - **Links are simulated.** There is no RSSI or radio data; link costs are a deterministic stand-in for transmit power.
 - **"Fail node" changes the topology view, not the telemetry feed.** It models a power loss for routing purposes. A real silent device is detected through the Part 2 heartbeat sweep and also shows as down.
-- **An MST minimises total network cost, not each node's own path cost.** A sensor's route along the tree is power-efficient for the network as a whole, but is not guaranteed to be that sensor's cheapest path to the gateway. A shortest-path tree (Dijkstra) would optimise per-node latency; it is listed under future work in the project report.
+- **An MST minimises total network cost, not each node's own path cost.** A sensor's route along the tree is power-efficient for the network as a whole, but is not guaranteed to be that sensor's cheapest path to the gateway. The Route tracker therefore also runs Dijkstra and reports the cheapest path for the selected node next to its tree route.
 - **The graph is rebuilt on each request.** That is milliseconds at this fleet size and removes any cache-invalidation risk when devices change; at tens of thousands of nodes it should be cached and invalidated on registry changes.
 - **History is in memory** and is lost when the API restarts.
 - **The Telemetry history panel uses UTC** for its window inputs.
