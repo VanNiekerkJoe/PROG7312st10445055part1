@@ -126,16 +126,17 @@ public sealed class MeshTopologyService(SensorRegistry registry, SortedHistoryLo
             {
                 if (id == graph.GatewayId)
                 {
-                    return new MeshNodeDto(id, "Gateway", true, null, null, null, false, null, 0, null);
+                    return new MeshNodeDto(id, "Gateway", true, null, null, null, false, null, 0, null, 0);
                 }
 
                 var node = snap.Devices[id];
                 mst.ParentOf.TryGetValue(id, out var parent);
                 mst.HopsToRoot.TryGetValue(id, out var hops);
                 snap.DownReason.TryGetValue(id, out var reason);
+                var cost = parent is null ? -1 : graph.PathCost(MeshGraph.PathToRoot(mst, id));
                 return new MeshNodeDto(
                     id, node.Name, false, node.Sensor!.MacAddress, snap.SubnetOf[id], node.Sensor.Category,
-                    graph.IsDown(id), reason, parent is null ? -1 : hops, parent);
+                    graph.IsDown(id), reason, parent is null ? -1 : hops, parent, cost);
             })
             .ToList();
 
@@ -158,7 +159,7 @@ public sealed class MeshTopologyService(SensorRegistry registry, SortedHistoryLo
         if (id is null)
         {
             return new MeshRouteResponse(query, false, null, null, $"No sensor matches \"{query}\". Try a MAC address or a device ID.",
-                [], 0, [], 0, false, []);
+                [], 0, [], 0, false, [], [], [], 0);
         }
 
         var mac = healthy.Devices[id].Sensor!.MacAddress;
@@ -176,7 +177,7 @@ public sealed class MeshTopologyService(SensorRegistry registry, SortedHistoryLo
                 .ToList();
             return new MeshRouteResponse(query, true, id, mac,
                 $"{id} is down ({live.DownReason[id]}). Neighbouring nodes that can still carry traffic are listed as alternative hops.",
-                normalPath, normalCost, [], 0, false, hops);
+                normalPath, normalCost, [], 0, false, hops, [], [], 0);
         }
 
         var liveMst = live.Graph.Prim();
@@ -185,16 +186,24 @@ public sealed class MeshTopologyService(SensorRegistry registry, SortedHistoryLo
         {
             return new MeshRouteResponse(query, true, id, mac,
                 $"{id} is alive but stranded: every path to the gateway crosses a failed node.",
-                normalPath, normalCost, [], 0, false, []);
+                normalPath, normalCost, [], 0, false, [], [], [], 0);
         }
 
         var liveCost = live.Graph.PathCost(livePath);
+        var shortestPath = MeshGraph.PathToRoot(live.Graph.ShortestPaths(), id);
+        var shortestCost = live.Graph.PathCost(shortestPath);
         var rerouted = !livePath.SequenceEqual(normalPath);
-        return new MeshRouteResponse(query, true, id, mac,
-            rerouted
-                ? $"Route healed around a failure: {livePath.Count - 1} hops, cost {liveCost} (was {normalCost})."
-                : $"Healthy route: {livePath.Count - 1} hops, cost {liveCost}.",
-            normalPath, normalCost, livePath, liveCost, rerouted, []);
+
+        var message = rerouted
+            ? $"Route healed around a failure: {livePath.Count - 1} hops, cost {liveCost} (was {normalCost})."
+            : $"Healthy route: {livePath.Count - 1} hops, cost {liveCost}.";
+        message += shortestCost < liveCost
+            ? $" The cheapest possible path for this node alone costs {shortestCost}; the spanning tree trades that for a lower total network cost."
+            : " This is also the cheapest possible path for this node.";
+
+        return new MeshRouteResponse(query, true, id, mac, message,
+            normalPath, normalCost, livePath, liveCost, rerouted, [],
+            live.Graph.HopsOf(livePath), shortestPath, shortestCost);
     }
 
     // ------------------------------------------------------------------ traversal
