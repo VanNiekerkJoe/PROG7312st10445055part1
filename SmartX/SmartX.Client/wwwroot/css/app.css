@@ -2251,3 +2251,57 @@ a.topnav-link:hover {
 @media (prefers-reduced-motion: reduce) {
     *, *::before, *::after { animation-duration: 0.001ms !important; animation-iteration-count: 1 !important; transition-duration: 0.001ms !important; }
 }
+
+/* ---------------------------------------------------------------- Part 3: mesh topology */
+.mesh-grid { display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 0.9rem; align-items: start; margin-bottom: 0.9rem; }
+.mesh-side { display: flex; flex-direction: column; gap: 0.9rem; min-width: 0; }
+.mesh-svg { width: 100%; height: auto; max-height: 640px; display: block; }
+.mesh-edge { stroke: #2c3945; stroke-width: 1.2; }
+.mesh-edge-mst { stroke: var(--green); stroke-width: 3; opacity: 0.85; }
+.mesh-edge-down { stroke: var(--red); stroke-width: 1; stroke-dasharray: 3 5; opacity: 0.55; }
+.mesh-edge-path { stroke: var(--accent); stroke-width: 5; opacity: 1; filter: drop-shadow(0 0 5px rgba(216, 168, 50, 0.7)); }
+.mesh-edge-old { stroke: var(--muted); stroke-width: 3; stroke-dasharray: 7 6; opacity: 0.9; }
+.mesh-cost { fill: var(--muted); font-size: 10px; text-anchor: middle; paint-order: stroke; stroke: var(--panel); stroke-width: 3px; }
+.mesh-node { cursor: pointer; }
+.mesh-dot { fill: var(--panel-raised); stroke: var(--green); stroke-width: 2.5; transition: stroke 0.2s, fill 0.2s; }
+.mesh-node:hover .mesh-dot { fill: #1d2833; }
+.mesh-node-down .mesh-dot { stroke: var(--red); fill: var(--red-soft); }
+.mesh-node-stranded .mesh-dot { stroke: #ff9d4d; stroke-dasharray: 4 3; }
+.mesh-node-selected .mesh-dot { stroke: var(--accent); stroke-width: 4; }
+.mesh-gw { fill: var(--accent-soft); stroke: var(--accent); stroke-width: 2.5; }
+.mesh-label { fill: var(--text); font-size: 10px; font-weight: 600; text-anchor: middle; pointer-events: none; }
+.mesh-label-gw { fill: var(--accent); font-size: 12px; }
+.mesh-legend { display: flex; flex-wrap: wrap; gap: 0.4rem 1.1rem; margin-top: 0.5rem; font-size: 0.72rem; color: var(--muted); align-items: center; }
+.mesh-legend .lg { display: inline-block; width: 18px; height: 0; border-top: 3px solid; vertical-align: middle; margin-right: 0.3rem; }
+.lg-up { border-color: var(--green); }
+.lg-down { border-color: var(--red); border-top-style: dotted; }
+.lg-path { border-color: var(--accent); }
+.lg-old { border-color: var(--muted); border-top-style: dashed; }
+.mesh-hint { color: var(--muted); font-size: 0.72rem; margin: 0.4rem 0 0; }
+.mesh-btn-row { display: flex; flex-wrap: wrap; gap: 0.4rem; margin: 0.6rem 0; }
+.mesh-result { margin-top: 0.7rem; padding: 0.7rem 0.8rem; border: 1px solid var(--border-bright); border-left-width: 3px; border-radius: 4px; background: var(--panel-raised); font-size: 0.78rem; }
+.mesh-result-ok { border-left-color: var(--green); }
+.mesh-result-warn { border-left-color: var(--accent); }
+.mesh-result-err { border-left-color: var(--red); }
+.mesh-result-msg { margin: 0 0 0.3rem; color: var(--text); }
+.mesh-mono { margin: 0.2rem 0; color: var(--muted); font-size: 0.72rem; line-height: 1.5; }
+.mesh-sub { margin: 0.6rem 0 0.15rem; color: var(--muted); font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.08em; }
+.mesh-path { margin: 0; line-height: 1.55; word-break: break-word; }
+.mesh-path-old { color: var(--muted); text-decoration: line-through; }
+.mesh-bad { color: var(--red); }
+.mesh-detour { margin: 0.25rem 0; line-height: 1.5; word-break: break-word; }
+.mesh-detour em { color: var(--muted); font-style: normal; }
+.mesh-hist-controls { display: grid; grid-template-columns: minmax(180px, 1.2fr) minmax(170px, 1fr) minmax(170px, 1fr); gap: 0.6rem; align-items: end; }
+.mesh-hist-controls .mesh-btn-row { grid-column: 1 / -1; margin: 0; }
+.mesh-field { display: flex; flex-direction: column; gap: 0.25rem; font-size: 0.68rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
+.mesh-chart { width: 100%; height: 90px; margin-top: 0.7rem; background: var(--panel-raised); border: 1px solid var(--border); border-radius: 4px; }
+.mesh-chart polyline { fill: none; stroke: var(--green); stroke-width: 1.6; vector-effect: non-scaling-stroke; }
+.mesh-table-wrap { max-height: 320px; overflow: auto; margin-top: 0.7rem; border: 1px solid var(--border); border-radius: 4px; }
+.mesh-table { width: 100%; border-collapse: collapse; font-size: 0.75rem; }
+.mesh-table th, .mesh-table td { padding: 0.35rem 0.7rem; text-align: left; border-bottom: 1px solid var(--border); }
+.mesh-table th { position: sticky; top: 0; background: var(--panel-raised); color: var(--muted); font-weight: 600; }
+
+@media (max-width: 1100px) {
+    .mesh-grid { grid-template-columns: 1fr; }
+    .mesh-hist-controls { grid-template-columns: 1fr; }
+}

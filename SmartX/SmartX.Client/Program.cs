@@ -31,4 +31,9 @@ builder.Services.AddSingleton(sp => new CommandHubClient(
     sp.GetRequiredService<FirebaseAuthSession>()));
 builder.Services.AddSingleton<LiveStateService>();
 
+// Part 3: mesh topology, routing and historical range queries.
+builder.Services.AddSingleton(sp => new MeshApiClient(
+    apiBaseAddress,
+    sp.GetRequiredService<FirebaseAuthSession>()));
+
 await builder.Build().RunAsync();

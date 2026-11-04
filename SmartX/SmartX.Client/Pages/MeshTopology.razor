@@ -1,0 +1,551 @@
+@page "/mesh"
+@using System.Globalization
+@using SmartX.Core.Mesh
+@using SmartX.Core.Storage
+@using SmartX.Client.Components
+@inject MeshApiClient MeshApi
+@implements IDisposable
+
+<div class="dashboard cs-page">
+    <header class="cs-hero">
+        <div>
+            <p class="cs-eyebrow">Part 3 &middot; Network topology</p>
+            <h1 class="cs-title">Mesh topology &amp; routing</h1>
+            <p class="cs-sub">Sensors hop through each other to reach the gateway. Fail a node and watch the route heal.</p>
+        </div>
+        <div class="cs-actions">
+            <button class="btn btn-blue" @onclick="RefreshAsync" disabled="@_busy"><span class="btn-ico">&#8635;</span> Refresh</button>
+            <button class="btn btn-green" @onclick="RestoreAllAsync" disabled="@(_busy || (_topo?.DownCount ?? 0) == 0)"><span class="btn-ico">&#10003;</span> Restore all nodes</button>
+        </div>
+    </header>
+
+    @if (!string.IsNullOrEmpty(_message))
+    {
+        <div class="cs-toast @(_messageOk ? "cs-toast-ok" : "cs-toast-err")" role="status">
+            <span>@_message</span>
+            <button type="button" class="cs-toast-x" aria-label="Dismiss" @onclick="DismissMessage">&#10005;</button>
+        </div>
+    }
+
+    @if (_topo is null)
+    {
+        <section class="panel">
+            <div class="cs-empty-state">
+                <span class="cs-empty-ico">&#9678;</span>
+                <p>@(_loading ? "Loading the mesh..." : "Could not reach the API. Check that SmartX.Api is running and you are signed in.")</p>
+            </div>
+        </section>
+    }
+    else
+    {
+        <div class="metric-row">
+            <MetricCard Label="Nodes online" Icon="●" Accent="green" Value="@(_topo.ConnectedCount.ToString(CultureInfo.InvariantCulture))"
+                        Hint="@($"of {_topo.Nodes.Count - 1} sensors reach the gateway")" />
+            <MetricCard Label="Down" Icon="✕" Accent="red" Value="@(_topo.DownCount.ToString(CultureInfo.InvariantCulture))"
+                        Hint="failed or silent nodes" />
+            <MetricCard Label="Stranded" Icon="⊘" Accent="orange" Value="@(_topo.StrandedCount.ToString(CultureInfo.InvariantCulture))"
+                        Hint="alive but cut off from the gateway" />
+            <MetricCard Label="MST power cost" Icon="⚡" Accent="amber" Value="@(_topo.MstCost.ToString(CultureInfo.InvariantCulture))"
+                        Hint="@(_topo.MstCost == _topo.KruskalCost ? "Prim and Kruskal agree" : $"Kruskal says {_topo.KruskalCost}")" />
+            <MetricCard Label="Links" Icon="⇄" Accent="blue" Value="@(_topo.Edges.Count.ToString(CultureInfo.InvariantCulture))"
+                        Hint="@($"{_topo.Edges.Count(e => e.InMst)} used by the spanning tree")" />
+        </div>
+
+        <div class="mesh-grid">
+            <section class="panel mesh-map-panel">
+                <p class="panel-title">Live mesh <span class="cs-count">thick green = minimum spanning tree</span></p>
+
+                <svg class="mesh-svg" viewBox="0 0 760 560" role="img" aria-label="Mesh network graph">
+                    @foreach (var edge in _topo.Edges)
+                    {
+                        if (!_pos.TryGetValue(edge.A, out var a) || !_pos.TryGetValue(edge.B, out var b)) { continue; }
+                        var key = EdgeKey(edge.A, edge.B);
+                        var touchesDown = IsDown(edge.A) || IsDown(edge.B);
+                        <line class="@EdgeClass(edge, key, touchesDown)" x1="@F(a.X)" y1="@F(a.Y)" x2="@F(b.X)" y2="@F(b.Y)" />
+                        @if (_topo.Nodes.Count <= 30 && !touchesDown)
+                        {
+                            <g><text class="mesh-cost" x="@F((a.X + b.X) / 2)" y="@F((a.Y + b.Y) / 2)">@edge.Cost</text></g>
+                        }
+                    }
+
+                    @foreach (var node in _topo.Nodes)
+                    {
+                        if (!_pos.TryGetValue(node.Id, out var p)) { continue; }
+                        var id = node.Id;
+                        <g class="@NodeClass(node)" transform="translate(@F(p.X) @F(p.Y))" @onclick="() => TrackAsync(id)">
+                            <title>@NodeTooltip(node)</title>
+                            @if (node.IsGateway)
+                            {
+                                <rect x="-22" y="-16" width="44" height="32" rx="6" class="mesh-gw" />
+                                <g><text class="mesh-label mesh-label-gw" y="4">GW</text></g>
+                            }
+                            else
+                            {
+                                <circle r="15" class="mesh-dot" />
+                                <g><text class="mesh-label" y="4">@ShortLabel(node.Id)</text></g>
+                            }
+                        </g>
+                    }
+                </svg>
+
+                <div class="mesh-legend">
+                    <span><i class="lg lg-up"></i> online</span>
+                    <span><i class="lg lg-down"></i> down</span>
+                    <span><i class="lg lg-path"></i> selected route</span>
+                    <span><i class="lg lg-old"></i> route before the failure</span>
+                    <span class="mesh-hint">Click a node to track it. Numbers on links are relative transmit power.</span>
+                </div>
+            </section>
+
+            <div class="mesh-side">
+                <section class="panel">
+                    <p class="panel-title">Route tracker</p>
+                    <input class="cs-input" type="search" placeholder="MAC address or device ID"
+                           @bind="_query" @bind:event="oninput" @onkeydown="OnQueryKey" />
+                    <div class="mesh-btn-row">
+                        <button class="btn btn-blue btn-sm" @onclick="() => TrackAsync(_query)" disabled="@(_busy || string.IsNullOrWhiteSpace(_query))">Track route</button>
+                        <button class="btn btn-red btn-sm" @onclick="FailSelectedAsync" disabled="@(_busy || string.IsNullOrWhiteSpace(_query))">Fail node</button>
+                        <button class="btn btn-green btn-sm" @onclick="RestoreSelectedAsync" disabled="@(_busy || string.IsNullOrWhiteSpace(_query))">Restore</button>
+                    </div>
+
+                    @if (_route is not null)
+                    {
+                        <div class="mesh-result @(_route.Found ? (_route.Rerouted ? "mesh-result-warn" : "mesh-result-ok") : "mesh-result-err")">
+                            <p class="mesh-result-msg">@_route.Message</p>
+                            @if (_route.Mac is not null)
+                            {
+                                <p class="mesh-mono">@_route.DeviceId &middot; @_route.Mac</p>
+                            }
+                            @if (_route.LivePath.Count > 0)
+                            {
+                                <p class="mesh-sub">Current route</p>
+                                <p class="mesh-path">@string.Join(" \u2192 ", _route.LivePath)</p>
+                            }
+                            @if (_route.Rerouted && _route.NormalPath.Count > 0)
+                            {
+                                <p class="mesh-sub">Normal route</p>
+                                <p class="mesh-path mesh-path-old">@string.Join(" \u2192 ", _route.NormalPath)</p>
+                            }
+                            @if (_route.AlternativeHops.Count > 0)
+                            {
+                                <p class="mesh-sub">Alternative hops</p>
+                                <p class="mesh-path">@string.Join(", ", _route.AlternativeHops)</p>
+                            }
+                        </div>
+                    }
+                </section>
+
+                <section class="panel">
+                    <p class="panel-title">Reachability <span class="cs-count">graph traversal</span></p>
+                    <div class="cs-filter-row">
+                        <select class="cs-input" aria-label="Subnet" @bind="_subnet">
+                            <option value="">Whole network</option>
+                            @foreach (var s in _subnets)
+                            {
+                                <option value="@s">@s</option>
+                            }
+                        </select>
+                        <select class="cs-input" aria-label="Algorithm" @bind="_algo">
+                            <option value="bfs">BFS (fewest hops)</option>
+                            <option value="dfs">DFS (follow chains)</option>
+                        </select>
+                    </div>
+                    <button class="btn btn-amber btn-block" @onclick="RunReachabilityAsync" disabled="@_busy">Who is connected?</button>
+
+                    @if (_reach is not null)
+                    {
+                        <div class="mesh-result mesh-result-ok">
+                            <p class="mesh-result-msg">@_reach.Subnet &middot; @_reach.Algorithm</p>
+                            <p class="mesh-sub">Connected (@_reach.Connected.Count)</p>
+                            <p class="mesh-path">@(_reach.Connected.Count == 0 ? "none" : string.Join(", ", _reach.Connected))</p>
+                            @if (_reach.Down.Count > 0)
+                            {
+                                <p class="mesh-sub mesh-bad">Down (@_reach.Down.Count)</p>
+                                <p class="mesh-path">@string.Join(", ", _reach.Down)</p>
+                            }
+                            @if (_reach.Stranded.Count > 0)
+                            {
+                                <p class="mesh-sub mesh-bad">Stranded (@_reach.Stranded.Count)</p>
+                                <p class="mesh-path">@string.Join(", ", _reach.Stranded)</p>
+                            }
+                            @if (_reach.Detours.Count > 0)
+                            {
+                                <p class="mesh-sub">Where traffic hops instead</p>
+                                @foreach (var d in _reach.Detours)
+                                {
+                                    <p class="mesh-detour">
+                                        <b>@d.DeviceId</b>
+                                        @if (d.NewPath.Count == 0)
+                                        {
+                                            <span class="mesh-bad"> no route left</span>
+                                        }
+                                        else
+                                        {
+                                            <span> via @string.Join(" \u2192 ", d.NewPath.Skip(1)) <em>(cost @d.OldCost &rarr; @d.NewCost)</em></span>
+                                        }
+                                    </p>
+                                }
+                            }
+                        </div>
+                    }
+                </section>
+            </div>
+        </div>
+
+        <section class="panel">
+            <p class="panel-title">Telemetry history <span class="cs-count">AVL tree range query</span></p>
+            <div class="mesh-hist-controls">
+                <input class="cs-input" type="search" placeholder="MAC address or device ID" @bind="_histQuery" />
+                <label class="mesh-field">From (UTC)<input class="cs-input" type="datetime-local" @bind="_from" /></label>
+                <label class="mesh-field">To (UTC)<input class="cs-input" type="datetime-local" @bind="_to" /></label>
+                <div class="mesh-btn-row">
+                    <button class="btn btn-ghost btn-sm" @onclick="() => SetWindow(15)">Last 15 min</button>
+                    <button class="btn btn-ghost btn-sm" @onclick="() => SetWindow(60)">Last hour</button>
+                    <button class="btn btn-ghost btn-sm" @onclick="() => SetWindow(180)">Last 3 h</button>
+                    <button class="btn btn-blue btn-sm" @onclick="QueryHistoryAsync" disabled="@(_busy || string.IsNullOrWhiteSpace(_histQuery))">Run query</button>
+                    <button class="btn btn-amber btn-sm" @onclick="BackfillAsync" disabled="@(_busy || string.IsNullOrWhiteSpace(_histQuery))" title="Adds 1,500 synthetic readings over the last 6 hours">Backfill demo data</button>
+                </div>
+            </div>
+
+            @if (_history is not null)
+            {
+                <div class="mesh-result @(_history.Found && _history.Matched > 0 ? "mesh-result-ok" : "mesh-result-err")">
+                    <p class="mesh-result-msg">@_history.Message</p>
+                    @if (_history.Found)
+                    {
+                        <p class="mesh-mono">
+                            @_history.DeviceId &middot; @_history.Mac<br />
+                            The tree visited @_history.NodesVisited of @_history.TotalStored stored readings (height @_history.TreeHeight)
+                            in @_history.ElapsedMicroseconds.ToString("0.0", CultureInfo.InvariantCulture) &micro;s.
+                            A plain list would have scanned all @_history.TotalStored.
+                        </p>
+                        @if (_history.Matched > 0)
+                        {
+                            <p class="mesh-mono">min @Num(_history.Min) &middot; avg @Num(_history.Average) &middot; max @Num(_history.Max)</p>
+                        }
+                    }
+                </div>
+
+                @if (_history.Points.Count > 1)
+                {
+                    <svg class="mesh-chart" viewBox="0 0 600 90" preserveAspectRatio="none" aria-hidden="true">
+                        <polyline points="@ChartPoints()" />
+                    </svg>
+                }
+
+                @if (_history.Points.Count > 0)
+                {
+                    <div class="mesh-table-wrap">
+                        <table class="mesh-table">
+                            <thead><tr><th>Timestamp (UTC)</th><th>Value</th><th>State</th></tr></thead>
+                            <tbody>
+                                @foreach (var point in _history.Points.Reverse().Take(200))
+                                {
+                                    <tr>
+                                        <td>@point.Timestamp.UtcDateTime.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture)</td>
+                                        <td>@point.Value.ToString("0.##", CultureInfo.InvariantCulture)</td>
+                                        <td>@point.Severity</td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                    @if (_history.Points.Count > 200)
+                    {
+                        <p class="mesh-hint">Showing the newest 200 of @_history.Points.Count returned readings.</p>
+                    }
+                }
+            }
+        </section>
+    }
+</div>
+
+@code {
+    private readonly CancellationTokenSource _cts = new();
+    private MeshTopologyResponse? _topo;
+    private MeshRouteResponse? _route;
+    private MeshSubnetResponse? _reach;
+    private HistoryRangeResponse? _history;
+    private List<string> _subnets = [];
+    private Dictionary<string, (double X, double Y)> _pos = new(StringComparer.Ordinal);
+    private HashSet<string> _pathEdges = [];
+    private HashSet<string> _oldPathEdges = [];
+
+    private string _query = "";
+    private string _subnet = "";
+    private string _algo = "bfs";
+    private string _histQuery = "";
+    private DateTime _from = DateTime.UtcNow.AddHours(-1);
+    private DateTime _to = DateTime.UtcNow;
+
+    private bool _busy;
+    private bool _loading = true;
+    private string? _message;
+    private bool _messageOk = true;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await RefreshAsync();
+        _subnets = await MeshApi.GetSubnetsAsync(_cts.Token);
+        _loading = false;
+        _ = PollAsync();
+    }
+
+    private async Task PollAsync()
+    {
+        using var timer = new PeriodicTimer(TimeSpan.FromSeconds(3));
+        try
+        {
+            while (await timer.WaitForNextTickAsync(_cts.Token))
+            {
+                await LoadTopologyAsync();
+                if (_route is { Found: true, DeviceId: not null })
+                {
+                    _route = await MeshApi.GetRouteAsync(_route.DeviceId, _cts.Token) ?? _route;
+                    BuildPathSets();
+                }
+
+                await InvokeAsync(StateHasChanged);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // page left; stop polling
+        }
+    }
+
+    private async Task LoadTopologyAsync()
+    {
+        var topo = await MeshApi.GetTopologyAsync(_cts.Token);
+        if (topo is null)
+        {
+            return;
+        }
+
+        _topo = topo;
+        ComputeLayout(topo);
+    }
+
+    private async Task RefreshAsync()
+    {
+        _busy = true;
+        await LoadTopologyAsync();
+        _busy = false;
+    }
+
+    private async Task TrackAsync(string idOrMac)
+    {
+        if (string.IsNullOrWhiteSpace(idOrMac))
+        {
+            return;
+        }
+
+        _query = idOrMac;
+        _histQuery = idOrMac;
+        _route = await MeshApi.GetRouteAsync(idOrMac.Trim(), _cts.Token);
+        BuildPathSets();
+    }
+
+    private async Task OnQueryKey(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter")
+        {
+            await TrackAsync(_query);
+        }
+    }
+
+    private async Task FailSelectedAsync()
+    {
+        _busy = true;
+        var ok = await MeshApi.FailAsync(_query.Trim(), _cts.Token);
+        Toast(ok ? $"{_query.Trim()} marked as failed. The mesh is re-routing." : $"No sensor matches \"{_query.Trim()}\".", ok);
+        await LoadTopologyAsync();
+        if (ok)
+        {
+            await TrackAsync(_query);
+            if (_reach is not null)
+            {
+                await RunReachabilityAsync();
+            }
+        }
+
+        _busy = false;
+    }
+
+    private async Task RestoreSelectedAsync()
+    {
+        _busy = true;
+        var ok = await MeshApi.RestoreAsync(_query.Trim(), _cts.Token);
+        Toast(ok ? $"{_query.Trim()} restored." : $"No sensor matches \"{_query.Trim()}\".", ok);
+        await LoadTopologyAsync();
+        if (ok)
+        {
+            await TrackAsync(_query);
+            if (_reach is not null)
+            {
+                await RunReachabilityAsync();
+            }
+        }
+
+        _busy = false;
+    }
+
+    private async Task RestoreAllAsync()
+    {
+        _busy = true;
+        var ok = await MeshApi.RestoreAllAsync(_cts.Token);
+        Toast(ok ? "All simulated outages cleared." : "Could not reach the API.", ok);
+        await LoadTopologyAsync();
+        if (!string.IsNullOrWhiteSpace(_query))
+        {
+            await TrackAsync(_query);
+        }
+
+        _busy = false;
+    }
+
+    private async Task RunReachabilityAsync()
+    {
+        _busy = true;
+        _reach = await MeshApi.GetReachableAsync(string.IsNullOrWhiteSpace(_subnet) ? null : _subnet, _algo == "dfs", _cts.Token);
+        _busy = false;
+    }
+
+    private void SetWindow(int minutes)
+    {
+        _to = DateTime.UtcNow;
+        _from = _to.AddMinutes(-minutes);
+    }
+
+    private async Task QueryHistoryAsync()
+    {
+        _busy = true;
+        var from = new DateTimeOffset(DateTime.SpecifyKind(_from, DateTimeKind.Utc));
+        var to = new DateTimeOffset(DateTime.SpecifyKind(_to, DateTimeKind.Utc));
+        _history = await MeshApi.GetHistoryRangeAsync(_histQuery.Trim(), from, to, _cts.Token);
+        _busy = false;
+    }
+
+    private async Task BackfillAsync()
+    {
+        _busy = true;
+        var ok = await MeshApi.BackfillAsync(_histQuery.Trim(), _cts.Token);
+        Toast(ok ? "Added 1,500 readings across the last 6 hours. Run a query to see them." : $"No sensor matches \"{_histQuery.Trim()}\".", ok);
+        _busy = false;
+    }
+
+    // ------------------------------------------------------------ layout and drawing helpers
+
+    private void ComputeLayout(MeshTopologyResponse topo)
+    {
+        const double cx = 380, cy = 280;
+        var devices = topo.Nodes.Where(n => !n.IsGateway)
+            .OrderBy(n => n.Subnet, StringComparer.Ordinal).ThenBy(n => n.Id, StringComparer.Ordinal).ToList();
+
+        var pos = new Dictionary<string, (double X, double Y)>(StringComparer.Ordinal);
+        var gateway = topo.Nodes.FirstOrDefault(n => n.IsGateway);
+        if (gateway is not null)
+        {
+            pos[gateway.Id] = (cx, cy);
+        }
+
+        var twoRings = devices.Count > 24;
+        for (var i = 0; i < devices.Count; i++)
+        {
+            var angle = -Math.PI / 2 + 2 * Math.PI * i / Math.Max(1, devices.Count);
+            var radius = twoRings ? (i % 2 == 0 ? 235 : 150) : 205;
+            pos[devices[i].Id] = (cx + radius * Math.Cos(angle), cy + radius * Math.Sin(angle));
+        }
+
+        _pos = pos;
+        BuildPathSets();
+    }
+
+    private void BuildPathSets()
+    {
+        _pathEdges = PathKeys(_route?.LivePath);
+        _oldPathEdges = _route is { Rerouted: true } ? PathKeys(_route.NormalPath) : [];
+    }
+
+    private static HashSet<string> PathKeys(IReadOnlyList<string>? path)
+    {
+        var keys = new HashSet<string>(StringComparer.Ordinal);
+        if (path is null)
+        {
+            return keys;
+        }
+
+        for (var i = 0; i + 1 < path.Count; i++)
+        {
+            keys.Add(EdgeKey(path[i], path[i + 1]));
+        }
+
+        return keys;
+    }
+
+    private static string EdgeKey(string a, string b) =>
+        string.CompareOrdinal(a, b) <= 0 ? a + "|" + b : b + "|" + a;
+
+    private bool IsDown(string id) => _topo?.Nodes.FirstOrDefault(n => n.Id == id)?.IsDown ?? false;
+
+    private string EdgeClass(MeshEdgeDto edge, string key, bool touchesDown)
+    {
+        if (touchesDown) { return "mesh-edge mesh-edge-down"; }
+        if (_pathEdges.Contains(key)) { return "mesh-edge mesh-edge-path"; }
+        if (_oldPathEdges.Contains(key)) { return "mesh-edge mesh-edge-old"; }
+        return edge.InMst ? "mesh-edge mesh-edge-mst" : "mesh-edge";
+    }
+
+    private string NodeClass(MeshNodeDto node)
+    {
+        var css = "mesh-node";
+        if (node.IsGateway) { css += " mesh-node-gw"; }
+        else if (node.IsDown) { css += " mesh-node-down"; }
+        else if (node.HopsToGateway < 0) { css += " mesh-node-stranded"; }
+        if (_route?.DeviceId == node.Id) { css += " mesh-node-selected"; }
+        return css;
+    }
+
+    private static string NodeTooltip(MeshNodeDto node)
+    {
+        if (node.IsGateway) { return "Gateway (sink for all telemetry)"; }
+        var state = node.IsDown ? $"DOWN: {node.DownReason}" : node.HopsToGateway < 0 ? "stranded" : $"{node.HopsToGateway} hops to gateway via {node.NextHop}";
+        return $"{node.Id}\n{node.Mac}\n{state}";
+    }
+
+    private static string ShortLabel(string id)
+    {
+        var idx = id.LastIndexOf("DEV", StringComparison.Ordinal);
+        return idx >= 0 ? id[idx..].Replace("DEV", "D") : id.Length > 4 ? id[^4..] : id;
+    }
+
+    private string ChartPoints()
+    {
+        var points = _history!.Points;
+        var step = Math.Max(1, points.Count / 300);
+        var sampled = points.Where((_, i) => i % step == 0).ToList();
+        var min = sampled.Min(p => p.Value);
+        var max = sampled.Max(p => p.Value);
+        var range = Math.Abs(max - min) < 0.0001 ? 1 : max - min;
+        return string.Join(" ", sampled.Select((p, i) =>
+            $"{F(i * 600.0 / Math.Max(1, sampled.Count - 1))},{F(80 - (p.Value - min) / range * 70)}"));
+    }
+
+    private static string F(double value) => value.ToString("0.#", CultureInfo.InvariantCulture);
+
+    private static string Num(double? value) => value?.ToString("0.##", CultureInfo.InvariantCulture) ?? "-";
+
+    private void Toast(string text, bool ok)
+    {
+        _message = text;
+        _messageOk = ok;
+    }
+
+    private void DismissMessage() => _message = null;
+
+    public void Dispose()
+    {
+        _cts.Cancel();
+        _cts.Dispose();
+    }
+}
