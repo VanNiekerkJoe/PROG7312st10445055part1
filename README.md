@@ -1,13 +1,13 @@
 # Smart-X IoT Mesh Ecosystem
 
-**PROG7312 Portfolio of Evidence: Part 1 (Sensor Data Ingestion and Telemetry) and Part 2 (Real-Time Command Stream and Device Management)**
+**PROG7312 Portfolio of Evidence: Part 1 (Sensor Data Ingestion and Telemetry), Part 2 (Real-Time Command Stream and Device Management) and Part 3 (Network Topology and Mesh Routing)**
 
 Built on **.NET 10**: an ASP.NET Core Minimal API with SignalR, a Blazor WebAssembly dashboard, a device simulator that behaves like a fleet of ESP32 nodes, and an xUnit test project.
 
 | | |
 |---|---|
 | Repository | `https://github.com/VanNiekerkJoe/PROG7312st10445055part1` |
-| Demo video (Part 2) | `[PASTE YOUTUBE LINK HERE]` |
+| Demo video (Part 3) | `[PASTE YOUTUBE LINK HERE]` |
 | Stack | .NET 10, ASP.NET Core Minimal API, SignalR, Blazor WebAssembly, xUnit, Docker Compose |
 
 ---
@@ -29,6 +29,7 @@ Built on **.NET 10**: an ASP.NET Core Minimal API with SignalR, a Blazor WebAsse
 13. [Design trade-offs and known limitations](#13-design-trade-offs-and-known-limitations)
 14. [Part 1 notes](#14-part-1-notes)
 15. [Rubric mapping](#15-rubric-mapping)
+16. [Part 3: Network topology and mesh routing](#16-part-3-network-topology-and-mesh-routing)
 
 ---
 
@@ -62,7 +63,7 @@ SmartX.sln
    Ingestion/             TelemetryIngestQueue  (Queue<T> + PriorityQueue)
    Commands/              CommandHistory        (Stack<T> undo + capped audit log)
    Storage/               DeviceStateStore      (Dictionary by MAC)
-                          SortedHistoryLog      (SortedDictionary by timestamp)
+                          SortedHistoryLog      (AVL tree by timestamp)
                           ActiveAlertSet        (HashSet<T>)
    Insights/              ActionPatternEngine   (learned suggestions with recency decay)
    Telemetry/ Devices/ Batching/   Part 1 domain model
@@ -88,7 +89,7 @@ flowchart LR
     PQ --> PROC[IngestProcessor<br/>background service]
     Q --> PROC
     PROC --> DS[(Dictionary<br/>MAC to device state)]
-    PROC --> SH[(SortedDictionary<br/>timestamp history)]
+    PROC --> SH[(AVL tree<br/>timestamp history)]
     PROC --> HS[(HashSet<br/>active alerts)]
     PROC --> PE[ActionPatternEngine]
     PROC -->|SignalR| UI[Blazor dashboard]
@@ -210,7 +211,7 @@ Switching between modules is asynchronous and does not lose state or open duplic
 | `Stack<T>` | `Commands/CommandHistory.cs` | Undo history of manual overrides | Push / pop O(1) | LIFO matches undo: the last command issued is the first reverted. Capped (see below). |
 | `Queue<T>` (capped) | `Commands/CommandHistory.cs` | Audit log shown in the history panel | Append and trim oldest O(1) | Trimming the oldest entry from a `List<T>` with `RemoveAt(0)` is O(n). A queue drops its head in O(1). |
 | `Dictionary<TKey,TValue>` | `Storage/DeviceStateStore.cs` | Registered devices keyed by **MAC address**, plus device ID to MAC | Lookup O(1) average | Every packet must resolve its sender instantly. Scanning the deployment tree would be O(n) per packet. |
-| `SortedDictionary<TKey,TValue>` | `Storage/SortedHistoryLog.cs` | Per-device history keyed by timestamp | Insert / remove O(log n) | The tree stays ordered as data arrives, so the dashboard never sorts at query time. |
+| `AvlTree<TKey,TValue>` (Part 3) | `Storage/AvlTree.cs`, `Storage/SortedHistoryLog.cs` | Per-device history keyed by timestamp, with range queries | Insert / remove / lookup O(log n), range O(log n + k) | A self-balancing tree stays ordered as data arrives, so the dashboard never sorts, and a time-window query touches only the matching part of the history. See [section 16](#16-part-3-network-topology-and-mesh-routing). |
 | `HashSet<T>` | `Storage/ActiveAlertSet.cs` | Active unique alert states (`deviceId|kind`) | Add / remove / contains O(1) | Sets store unique elements, so a second Disconnected alert for the same sensor is refused automatically. |
 | Nested `Dictionary` | `Insights/ActionPatternEngine.cs` | Transition table `context -> follow-up -> weight` | O(1) update | A sparse table of learned (context, command) pairs. |
 
@@ -223,7 +224,7 @@ Every growing structure has a limit, because a long-running gateway cannot let a
 | Standard ingest lane | 5000 packets | `Enqueue` returns `false` (back-pressure) |
 | Undo stack | 200 commands | The oldest undo entry is discarded when a new command is pushed |
 | Audit log | 200 entries | The oldest entry is dequeued |
-| History per device | 300 points | The oldest timestamp is removed |
+| History per device | 5000 points (was 300 in Part 2) | The oldest timestamp is removed (tree minimum) |
 
 ### The undo stack in detail
 
@@ -231,9 +232,7 @@ Every growing structure has a limit, because a long-running gateway cannot let a
 
 ### History timeline: complexity trade-off
 
-`SortedDictionary` gives O(log n) insertion and keeps keys ordered, which is the right trade for a write-heavy telemetry stream. Reading the latest N points walks the tree and skips the older entries, so a read is **O(n)** in the number of stored points for that device. With the 300-point cap this is trivial (a few microseconds), and the cap is what keeps it cheap.
-
-If the cap were raised substantially, two options exist: enumerate in reverse (`Reverse()` over the tree) and take N from the end, or switch to a `SortedList<TKey,TValue>`, which supports indexed access to the tail at the cost of O(n) inserts. Because telemetry arrives in timestamp order, inserts land at the end anyway, so `SortedList` would also be cheap here. `SortedDictionary` was kept because inserts are the hot path and the cap bounds the read cost.
+Part 2 stored history in a `SortedDictionary` (a red-black tree) capped at 300 points. Part 3 replaces it with a hand-written `AvlTree`, because the Network Topology page must answer *time-window* questions ("moisture between 14:00 and 16:00 for Node A") and the built-in tree cannot be searched by range without enumerating from the start. The AVL tree keeps O(log n) inserts, makes `Latest(n)` a walk from the newest end (no sort, no skip), adds an O(log n + k) `Range(from, to)`, and lets the cap rise to 5000 readings per device. Details and measurements are in [section 16.3](#163-historical-data-querying-avl-tree).
 
 ---
 
@@ -275,9 +274,9 @@ curl -k -X POST https://localhost:5001/api/telemetry/ingest ^
 2. The device state updates instantly without any search. The lookup is `DeviceStateStore.TryGetByMac` (`Dictionary`, case-insensitive MAC key).
 3. Register a new device from **Sensor ingestion**. `DeviceStateStore.Sync` adds it to both dictionaries on the next sync tick, and packets for its MAC resolve at once.
 
-### Test 5: SortedDictionary (timeline)
+### Test 5: AVL tree (timeline)
 
-Select a device. The timeline graph is read from `GET /api/telemetry/history/{deviceId}?count=60`, already in timestamp order, with no sorting at query time.
+Select a device. The timeline graph is read from `GET /api/telemetry/history/{deviceId}?count=60`, already in timestamp order, with no sorting at query time. The time-window version of this test is in [section 16.6](#166-demo-script-for-the-marker).
 
 ### Test 6: HashSet (duplicate alert suppression)
 
@@ -400,6 +399,20 @@ To verify: set a search term and a filter, navigate to Home and back (they persi
 | POST | `/api/insights/search` | Log an operator search so the engine can learn from it |
 | POST | `/api/insights/train-demo` | Preload demonstration patterns |
 
+### Part 3
+
+| Method | Route | Purpose |
+|---|---|---|
+| GET | `/api/mesh` | Whole graph: nodes, links, Prim MST flags, Kruskal cost, connectivity counts |
+| GET | `/api/mesh/subnets` | Subnet (sub-zone) names for the reachability picker |
+| GET | `/api/mesh/route/{idOrMac}` | One sensor's route to the gateway, normal versus healed, with alternative hops |
+| GET | `/api/mesh/reachable?subnet=&algo=bfs\|dfs` | Traversal: who is connected, who is down or stranded, where traffic hops instead |
+| POST | `/api/mesh/nodes/{idOrMac}/fail`, `/restore`, `/api/mesh/restore-all` | Simulate or clear a node outage |
+| GET | `/api/mesh/history/{idOrMac}?from=&to=&limit=` | Range query on the AVL tree, with nodes-visited statistics |
+| POST | `/api/mesh/history/{idOrMac}/backfill?count=1500&hours=6` | Demo: add synthetic timestamped readings |
+
+All Part 3 routes require a Firebase ID token like the rest of the API.
+
 ### SignalR
 
 | Hub | Path | Events |
@@ -435,6 +448,7 @@ dotnet test SmartX.Api.Tests
 | `SensorRegistryTests` / `PipelineStructuresTests` | MAC lookup and sync, duplicate-alert suppression, sorted history ordering and capacity |
 | `ActionPatternEngineTests` | Learned, rule-based and watch-list paths; minimum support; smoothed confidence; **decay on an injected clock** (evidence halves, then is pruned); watch-list fades; repeated searches credited once; weak runner-up hidden; demo data labelled and idempotent; removed devices purged; prefix-only search matching; stable ordering |
 | `CoreDomainTests`, `DeploymentTreeValidatorTests` | Part 1: operator overloads, jagged-array batching, recursive tree validation |
+| `Part3MeshTests` | Part 3: AVL balance on sorted input, range-query correctness and nodes visited, delete rebalancing, min-heap ordering, Prim equals Kruskal (fixed example and 100 random meshes), BFS versus DFS order, healing around a failed node, stranded-node detection, deterministic topology, route lookup by MAC, history range through the service |
 
 ---
 
@@ -486,3 +500,163 @@ Part 1 delivered Sensor Data Ingestion and Telemetry.
 | Sets (10) | `ActiveAlertSet`; test 6 |
 | Predictive action and suggestion engine (30) | `ActionPatternEngine`; [section 8](#8-predictive-action-and-recommendation-engine) |
 | GitHub, commits, collaboration, README | This repository and this README |
+
+---
+
+## 16. Part 3: Network topology and mesh routing
+
+Part 3 adds the third menu item, **Mesh topology** (`/mesh`), and finishes the Smart-X application. Parts 1 and 2 are unchanged and still reachable from the same top navigation bar.
+
+### 16.1 Feature tour
+
+| Panel | What it does | Data structure behind it |
+|---|---|---|
+| **Live mesh** | Draws the gateway and every sensor with their wireless links. Thick green links are the minimum spanning tree. Down nodes turn red and their links dim. Click a node to track it. Refreshes every 3 seconds. | Graph, Prim's algorithm |
+| **Route tracker** | Type a MAC address or device ID. Shows the hop-by-hop route to the gateway, its power cost, and (after a failure) the old route struck through next to the new one. **Fail node** and **Restore** simulate outages. | Graph, MST parent chain |
+| **Reachability** | Pick the whole network or one subnet (sub-zone) and BFS or DFS. Lists connected, down and stranded devices, and for every affected device the new path ("where to hop"). | BFS, DFS |
+| **Telemetry history** | Pick a sensor and a UTC time window. Returns the readings, min / average / max, a chart, and how many tree nodes the query visited out of how many are stored. **Backfill demo data** adds 1,500 timestamped readings over six hours. | AVL tree |
+
+### 16.2 How the mesh is modelled
+
+The simulation has no radio hardware, so links are generated from the deployment tree by `MeshTopologyBuilder`. The generation is deterministic (the same fleet always gives the same mesh and costs), which keeps demos and tests repeatable:
+
+- every sub-zone is a ring of relays (each node hears its two neighbours);
+- the first device in each sub-zone is that subnet's uplink to the **GATEWAY**;
+- the last device of one sub-zone also hears the first device of the next, so subnets back each other up when an uplink dies;
+- each link has a cost from 1 to 9 (relative transmit power), from a stable FNV-1a hash of the two endpoints.
+
+A node is **down** when either the ingest pipeline has marked it *Disconnected* (no heartbeat for 20 s, the Part 2 sweep) or an operator has clicked **Fail node**. Devices registered, imported or deleted in Part 1 appear in or leave the mesh automatically, because the graph is rebuilt from the live deployment tree on each request.
+
+### 16.3 Historical data querying: AVL tree
+
+`Storage/AvlTree.cs` is a self-balancing binary search tree written from scratch. After every insert or delete it checks each node on the path back to the root and, if the left and right subtree heights differ by more than one, restores balance with a single or double rotation:
+
+```csharp
+private static Node Rebalance(Node node)
+{
+    Update(node);                       // height = 1 + max(child heights)
+    var balance = BalanceOf(node);      // left height - right height
+
+    if (balance > 1)                    // left-heavy
+    {
+        if (BalanceOf(node.Left!) < 0)
+            node.Left = RotateLeft(node.Left!);    // left-right case
+        return RotateRight(node);                   // left-left case
+    }
+    if (balance < -1)                   // right-heavy
+    {
+        if (BalanceOf(node.Right!) > 0)
+            node.Right = RotateRight(node.Right!); // right-left case
+        return RotateLeft(node);                    // right-right case
+    }
+    return node;
+}
+```
+
+**Why a self-balancing tree and not a plain BST.** Telemetry arrives in timestamp order. Inserting sorted keys into an ordinary binary search tree builds a linked list with O(n) operations. The AVL rotations keep height at about 1.44 x log2(n) regardless of arrival order. A unit test inserts 10,000 sorted keys and asserts the height is at most 15.
+
+**The range query.** `Range(from, to)` only descends into a subtree if that subtree can still hold keys inside the window:
+
+```csharp
+visited++;
+var aboveLower = node.Key.CompareTo(from) >= 0;
+var belowUpper = node.Key.CompareTo(to)   <= 0;
+
+if (aboveLower) CollectRange(node.Left,  from, to, items, ref visited); // left side can still match
+if (aboveLower && belowUpper) items.Add(node);                          // this node matches
+if (belowUpper) CollectRange(node.Right, from, to, items, ref visited); // right side can still match
+```
+
+Cost is O(log n + k) for k matches. `SortedHistoryLog` keeps one `AvlTree<DateTimeOffset, HistoryPoint>` per device, so "moisture readings between 14:00 and 16:00 for Node A" first resolves Node A by MAC in the O(1) device dictionary, then asks only that node's tree. The Telemetry history panel prints the proof (counts from one real run; the microsecond figure varies by machine and is much larger on the first call because of JIT warm-up):
+
+```
+250 readings in window.
+The tree visited 262 of 1500 stored readings (height 11) in <n> µs.
+A plain list would have scanned all 1500.
+```
+
+**Scaling.** Visited nodes grow with log n plus the number of matches, not with history size. In the unit tests, a 100-reading window in a 20,000-reading tree visits about 115 nodes. The per-device cap is 5000 readings; the oldest reading (tree minimum) is evicted in O(log n) when the cap is exceeded.
+
+### 16.4 Network graphing and traversal
+
+`Mesh/MeshGraph.cs` stores the mesh as an **adjacency list**: a `Dictionary<string, List<MeshEdge>>` from each vertex (an ESP32, or the gateway) to its wireless links. For a sparse mesh where every node hears only a few neighbours this uses O(V + E) memory, where an adjacency matrix would need O(V^2). Edges are undirected and weighted by transmit power. A `HashSet` of down nodes lets every algorithm treat a failure as "this vertex does not exist right now", which is exactly how the mesh heals.
+
+**BFS** uses a FIFO `Queue<string>`, so it visits nodes in rings of increasing hop count and answers "who is currently connected to this gateway or subnet" with the fewest-hop picture:
+
+```csharp
+queue.Enqueue(start);
+while (queue.Count > 0)
+{
+    var current = queue.Dequeue();
+    order.Add(current);
+    foreach (var edge in OrderedLinks(current))
+    {
+        var next = edge.Other(current);
+        if (IsDown(next) || !Allowed(next, within) || !seen.Add(next)) continue;
+        queue.Enqueue(next);
+    }
+}
+```
+
+**DFS** uses an explicit `Stack<string>` instead of recursion, so a long daisy chain of relays cannot overflow the call stack. It follows one chain to its end before backtracking.
+
+Both are O(V + E). `Connectivity()` runs a BFS from the gateway and sorts every other vertex into **connected**, **down**, or **stranded** (alive, but every path to the gateway crosses a failed node). The Reachability panel then compares each affected node's route on the healthy graph with its route on the live graph and prints the detour, for example:
+
+```
+ZA-SUB1-DEV3: ZA-SUB1-DEV3 > ZA-SUB1-DEV4 > ZA-SUB1-DEV1 > GATEWAY (cost 19)
+           -> ZA-SUB1-DEV3 > ZA-SUB1-DEV4 > ZB-SUB1-DEV1 > ZB-SUB1-DEV3 > ZB-SUB2-DEV1 > GATEWAY (cost 26)
+```
+
+### 16.5 Minimum spanning tree and the heap
+
+**`Collections/MinHeap.cs`** is a hand-written array-backed binary min-heap (parent of index i at (i - 1) / 2, children at 2i + 1 and 2i + 2). `Enqueue` sifts up and `TryDequeue` sifts down, both O(log n); the smallest priority is always at index 0.
+
+**Prim's algorithm** grows a tree outward from the gateway. The heap holds candidate links leaving the tree, ordered by cost; the cheapest is popped, and if its far end is new it is added and that node's links are pushed:
+
+```csharp
+PushEdgesOf(GatewayId);
+while (heap.TryDequeue(out var item, out _))
+{
+    var next = item.Edge.Other(item.From);
+    if (!inTree.Add(next)) continue;     // a cheaper link already reached this node
+    chosen.Add(item.Edge);
+    total += item.Edge.Cost;
+    parent[next] = item.From;            // next hop toward the gateway
+    hops[next] = hops[item.From] + 1;
+    PushEdgesOf(next);
+}
+```
+
+Total time is O(E log V). Because the tree is rooted at the gateway, every sensor's route is simply its chain of parents (`PathToRoot`), and the tree's total cost is the minimum power needed to keep every live node connected. Down nodes are never pushed, so failing a relay and recomputing produces the healed tree.
+
+**Kruskal's algorithm** is implemented as an independent check (`KruskalTotalCost`): sort all live links by cost and add each one unless a union-find structure (path halving plus union by size) says it would close a loop. The Live mesh page shows "Prim and Kruskal agree", and a unit test compares the two on 100 random meshes.
+
+### 16.6 Demo script for the marker
+
+1. Start the API, client and simulator ([section 4](#4-prerequisites-build-and-run)), sign in, and open **Mesh topology**.
+2. **Graph and MST:** the map shows the gateway and every sensor. Thick green links are the minimum spanning tree; the **MST power cost** card shows its total.
+3. **Track by MAC:** paste a MAC address from the Sensor ingestion page (or click a node). The route to the gateway is highlighted in amber.
+4. **Self-healing:** with that node still selected, click **Fail node** on the first relay in its route (the node next to the gateway). The route redraws around the failure, the old route appears struck through, and **Nodes online** drops by one.
+5. **Traversal:** choose a subnet and **BFS** or **DFS**, then **Who is connected?** The panel lists connected, down and stranded devices and the new hops.
+6. **Restore:** **Restore all nodes** returns the mesh to its original shape.
+7. **AVL range query:** in Telemetry history, enter a device ID or MAC, click **Backfill demo data**, choose **Last 3 h** and **Run query**. Read the "tree visited N of M readings" line.
+
+### 16.7 Honest limitations
+
+- **Links are simulated.** There is no RSSI or radio data; link costs are a deterministic stand-in for transmit power.
+- **"Fail node" changes the topology view, not the telemetry feed.** It models a power loss for routing purposes. A real silent device is detected through the Part 2 heartbeat sweep and also shows as down.
+- **An MST minimises total network cost, not each node's own path cost.** A sensor's route along the tree is power-efficient for the network as a whole, but is not guaranteed to be that sensor's cheapest path to the gateway. A shortest-path tree (Dijkstra) would optimise per-node latency; it is listed under future work in the project report.
+- **The graph is rebuilt on each request.** That is milliseconds at this fleet size and removes any cache-invalidation risk when devices change; at tens of thousands of nodes it should be cached and invalidated on registry changes.
+- **History is in memory** and is lost when the API restarts.
+- **The Telemetry history panel uses UTC** for its window inputs.
+
+### 16.8 Rubric mapping (Part 3)
+
+| Rubric area | Where to look |
+|---|---|
+| Tree structures and historical telemetry queries (30) | `AvlTree`, `SortedHistoryLog.Range`, `MeshTopologyService.HistoryRange`; Telemetry history panel; [16.3](#163-historical-data-querying-avl-tree) |
+| Graphs, traversals and minimum spanning trees (30) | `MeshGraph` (adjacency list, `Bfs`, `Dfs`, `Prim`, `KruskalTotalCost`), `MinHeap`; Live mesh, Route tracker and Reachability panels; [16.4](#164-network-graphing-and-traversal), [16.5](#165-minimum-spanning-tree-and-the-heap) |
+| Implementation report: README and code explanations (10) | This section |
+| Project completion report, technology recommendations, update ledger (25) | `docs/` folder: completion report, technology recommendations, `UPDATES.md` |
+| Main menu integration and architecture health (5) | `NavMenu` now links all three modules; Parts 1 and 2 pages unchanged |
+| GitHub use | Commit history and this README |

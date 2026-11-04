@@ -5,19 +5,20 @@ namespace SmartX.Core.Storage;
 public sealed record HistoryPoint(DateTimeOffset Timestamp, double Value, AnomalySeverity Severity);
 
 /// <summary>
-/// Historical sensor logs kept in a SortedDictionary&lt;TKey, TValue&gt; keyed
-/// by timestamp (one per device). The tree keeps entries ordered as they are
-/// inserted, so the dashboard can read "the last N points, oldest first"
-/// straight off the structure and render a timeline graph without ever
-/// sorting at query time. Insert / remove are O(log n). Latest() walks values
-/// to skip older points (O(n)); this is bounded by the 300-point per-device
-/// capacity. A SortedList would enable indexed reads but make inserts/removes
-/// O(n), so the tree is preferred for the current write-and-cap workload.
+/// Historical sensor logs. Part 3 upgrade: each device's history is now an
+/// <see cref="AvlTree{TKey,TValue}"/> keyed by timestamp instead of a SortedDictionary
+/// (a red-black tree we could not look inside). The self-balancing tree keeps entries
+/// ordered as they arrive, so:
+///   - Append is O(log n), and so is evicting the oldest point once the cap is reached;
+///   - Latest(n) walks the tree from the newest end, so it never sorts;
+///   - Range(from, to) answers "all readings between 14:00 and 16:00 for this node"
+///     in O(log n + k), touching only the nodes on the path to the window plus the
+///     k matches, instead of scanning the whole history.
 /// </summary>
-public sealed class SortedHistoryLog(int capacityPerDevice = 300)
+public sealed class SortedHistoryLog(int capacityPerDevice = 5000)
 {
     private readonly object _lock = new();
-    private readonly Dictionary<string, SortedDictionary<DateTimeOffset, HistoryPoint>> _byDevice = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, AvlTree<DateTimeOffset, HistoryPoint>> _byDevice = new(StringComparer.Ordinal);
 
     public void Append(string deviceId, double value, AnomalySeverity severity, DateTimeOffset? at = null)
     {
@@ -25,7 +26,7 @@ public sealed class SortedHistoryLog(int capacityPerDevice = 300)
         {
             if (!_byDevice.TryGetValue(deviceId, out var log))
             {
-                log = new SortedDictionary<DateTimeOffset, HistoryPoint>();
+                log = new AvlTree<DateTimeOffset, HistoryPoint>();
                 _byDevice[deviceId] = log;
             }
 
@@ -35,11 +36,11 @@ public sealed class SortedHistoryLog(int capacityPerDevice = 300)
                 timestamp = timestamp.AddTicks(1); // keys must be unique
             }
 
-            log[timestamp] = new HistoryPoint(timestamp, value, severity);
+            log.Set(timestamp, new HistoryPoint(timestamp, value, severity));
 
-            while (log.Count > capacityPerDevice)
+            while (log.Count > capacityPerDevice && log.TryGetMin(out var oldest, out _))
             {
-                log.Remove(log.Keys.First());
+                log.Remove(oldest);
             }
         }
     }
@@ -49,13 +50,24 @@ public sealed class SortedHistoryLog(int capacityPerDevice = 300)
     {
         lock (_lock)
         {
+            return _byDevice.TryGetValue(deviceId, out var log)
+                ? log.Last(Math.Max(1, count)).Select(pair => pair.Value).ToList()
+                : [];
+        }
+    }
+
+    /// <summary>Every point with from &lt;= timestamp &lt;= to, oldest first, plus the cost of the query.</summary>
+    public (IReadOnlyList<HistoryPoint> Points, RangeStats Stats) Range(string deviceId, DateTimeOffset from, DateTimeOffset to)
+    {
+        lock (_lock)
+        {
             if (!_byDevice.TryGetValue(deviceId, out var log))
             {
-                return [];
+                return ([], new RangeStats(0, 0, 0, 0));
             }
 
-            var skip = Math.Max(0, log.Count - Math.Max(1, count));
-            return log.Values.Skip(skip).ToList();
+            var (items, stats) = log.Range(from, to);
+            return (items.Select(pair => pair.Value).ToList(), stats);
         }
     }
 
@@ -64,6 +76,14 @@ public sealed class SortedHistoryLog(int capacityPerDevice = 300)
         lock (_lock)
         {
             return _byDevice.TryGetValue(deviceId, out var log) ? log.Count : 0;
+        }
+    }
+
+    public int HeightFor(string deviceId)
+    {
+        lock (_lock)
+        {
+            return _byDevice.TryGetValue(deviceId, out var log) ? log.Height : 0;
         }
     }
 
