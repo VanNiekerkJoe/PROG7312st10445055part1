@@ -1,5 +1,7 @@
 # Smart-X IoT Mesh Ecosystem
 
+<p align="center"><img src="docs/smartx-logo-wordmark.png" alt="Smart-X Secure Operations Console" width="520"></p>
+
 A hybrid IoT monitoring platform for distributed environments (hydroponic farms, utility trackers, smart grids). A fleet of ESP32-style sensors reports telemetry to a gateway; operators watch, command and route around failures from a live dashboard.
 
 **PROG7312 Portfolio of Evidence** &middot; Part 1: Sensor Data Ingestion and Telemetry &middot; Part 2: Real-Time Command Stream and Device Management &middot; Part 3: Network Topology and Mesh Routing
