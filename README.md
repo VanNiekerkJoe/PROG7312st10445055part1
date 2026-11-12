@@ -722,3 +722,50 @@ Starts the API (`8080`), the client (`8081`) and the simulator. The simulator re
 | [`docs/UPDATES.md`](docs/UPDATES.md) | Ledger of changes made after Parts 1 and 2, with commits |
 
 The submitted PDF report contains the completion report and the technology recommendations.
+
+Reference list
+
+Cormen, T.H., Leiserson, C.E., Rivest, R.L. and Stein, C. (2022) Introduction to algorithms. 4th edn. Cambridge, MA: MIT Press. Available at: https://mitpress.mit.edu/9780262046305/introduction-to-algorithms/ (Accessed: 12 November 2026).
+
+Firebase (n.d.) Firebase Authentication. Available at: https://firebase.google.com/docs/auth (Accessed: 12 November 2026).
+
+GitHub (n.d.a) About code scanning with CodeQL. Available at: https://docs.github.com/en/code-security/code-scanning/introduction-to-code-scanning/about-code-scanning-with-codeql (Accessed: 12 November 2026).
+
+GitHub (n.d.b) Understanding GitHub Actions. Available at: https://docs.github.com/en/actions/get-started/understand-github-actions (Accessed: 12 November 2026).
+
+Google Cloud (n.d.) What is Pub/Sub? Available at: https://cloud.google.com/pubsub/docs/overview (Accessed: 12 November 2026).
+
+Grafana Labs (n.d.) Grafana documentation. Available at: https://grafana.com/docs/grafana/latest/ (Accessed: 12 November 2026).
+
+Home Assistant (n.d.) MQTT integration. Available at: https://www.home-assistant.io/integrations/mqtt/ (Accessed: 12 November 2026).
+
+Kubernetes (n.d.) Kubernetes overview. Available at: https://kubernetes.io/docs/concepts/overview/ (Accessed: 12 November 2026).
+
+Microsoft (n.d.a) Azure Container Apps overview. Available at: https://learn.microsoft.com/en-us/azure/container-apps/overview (Accessed: 12 November 2026).
+
+Microsoft (n.d.b) Azure IoT Hub concepts overview. Available at: https://learn.microsoft.com/en-us/azure/iot-hub/iot-concepts-and-iot-hub (Accessed: 12 November 2026).
+
+Microsoft (n.d.c) Enable cross-origin requests (CORS) in ASP.NET Core. Available at: https://learn.microsoft.com/en-us/aspnet/core/security/cors (Accessed: 12 November 2026).
+
+Microsoft (n.d.d) Introduction to ASP.NET Core Blazor. Available at: https://learn.microsoft.com/en-us/aspnet/core/blazor/ (Accessed: 12 November 2026).
+
+Microsoft (n.d.e) Introduction to ASP.NET Core SignalR. Available at: https://learn.microsoft.com/en-us/aspnet/core/signalr/introduction (Accessed: 12 November 2026).
+
+Microsoft (n.d.f) Microsoft.Extensions.AI libraries. Available at: https://learn.microsoft.com/en-us/dotnet/ai/microsoft-extensions-ai (Accessed: 12 November 2026).
+
+Microsoft (n.d.g) PriorityQueue<TElement,TPriority> class. Available at: https://learn.microsoft.com/en-us/dotnet/api/system.collections.generic.priorityqueue-2 (Accessed: 12 November 2026).
+
+Microsoft (n.d.h) Set up a Redis backplane for ASP.NET Core SignalR scale-out. Available at: https://learn.microsoft.com/aspnet/core/signalr/redis-backplane (Accessed: 12 November 2026).
+
+MQTT.org (n.d.) MQTT: The standard for IoT messaging. Available at: https://mqtt.org/ (Accessed: 12 November 2026).
+
+MQTTnet (n.d.) MQTTnet: high performance .NET library for MQTT based communication. Available at: https://github.com/dotnet/MQTTnet (Accessed: 12 November 2026).
+
+Npgsql (n.d.) Npgsql: .NET access to PostgreSQL. Available at: https://www.npgsql.org/ (Accessed: 12 November 2026).
+
+OpenTelemetry (n.d.) OpenTelemetry for .NET. Available at: https://opentelemetry.io/docs/languages/dotnet/ (Accessed: 12 November 2026).
+
+Timescale (n.d.) Hypertables. Available at: https://docs.timescale.com/using-timescaledb/hypertables (Accessed: 12 November 2026).
+
+
+
