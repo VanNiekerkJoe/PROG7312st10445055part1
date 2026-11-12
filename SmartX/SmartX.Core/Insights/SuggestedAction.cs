@@ -15,4 +15,5 @@ public sealed record SuggestedAction(
     string? DeviceId,
     CommandType? Command,
     double Confidence,
-    string Basis);
+    string Basis,
+    int Observations = 0);

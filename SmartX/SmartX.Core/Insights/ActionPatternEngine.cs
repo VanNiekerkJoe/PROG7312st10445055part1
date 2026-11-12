@@ -31,14 +31,15 @@ public sealed class ActionPatternEngine
     private readonly Queue<ContextEvent> _recent = new();
     private readonly Dictionary<string, DecayedCount> _alertCountByDevice = new(StringComparer.Ordinal);
 
-    private sealed record Evidence(double Real, double Demo, DateTimeOffset At)
+    private sealed record Evidence(double Real, double Demo, int RealObservations, int DemoObservations, DateTimeOffset At)
     {
         public double Total => Real + Demo;
+        public int Observations => RealObservations + DemoObservations;
     }
 
     private sealed record DecayedCount(double Value, DateTimeOffset At);
     private sealed record ContextEvent(string Key, string? DeviceId, DateTimeOffset At);
-    private sealed record WeightedFollowUp(string Key, double Real, double Demo)
+    private sealed record WeightedFollowUp(string Key, double Real, double Demo, int Observations)
     {
         public double Total => Real + Demo;
     }
@@ -251,7 +252,8 @@ public sealed class ActionPatternEngine
                         device.DeviceId,
                         command,
                         Confidence(followUp.Total, total),
-                        "learned"));
+                        "learned",
+                        followUp.Observations));
                     learnedForDevice.Add(device.DeviceId);
                 }
             }
@@ -296,7 +298,8 @@ public sealed class ActionPatternEngine
                             parts[0],
                             command,
                             Confidence(followUp.Total, total),
-                            "learned"));
+                            "learned",
+                            followUp.Observations));
                     }
                 }
             }
@@ -480,17 +483,26 @@ public sealed class ActionPatternEngine
 
         if (!followUps.TryGetValue(followUp, out var existing))
         {
-            followUps[followUp] = new Evidence(by, 0, at);
+            followUps[followUp] = new Evidence(by, 0, 1, 0, at);
         }
         else if (at >= existing.At)
         {
             var factor = DecayFactor(existing.At, at, _options.PatternHalfLife);
-            followUps[followUp] = new Evidence(existing.Real * factor + by, existing.Demo * factor, at);
+            followUps[followUp] = new Evidence(
+                existing.Real * factor + by,
+                existing.Demo * factor,
+                existing.RealObservations + 1,
+                existing.DemoObservations,
+                at);
         }
         else
         {
             var lateEvidence = by * DecayFactor(at, existing.At, _options.PatternHalfLife);
-            followUps[followUp] = existing with { Real = existing.Real + lateEvidence };
+            followUps[followUp] = existing with
+            {
+                Real = existing.Real + lateEvidence,
+                RealObservations = existing.RealObservations + 1
+            };
         }
 
         if (_transitions.Count > _options.MaxContexts)
@@ -506,8 +518,10 @@ public sealed class ActionPatternEngine
             ? new Evidence(
                 existing.Real * DecayFactor(existing.At, at, _options.PatternHalfLife),
                 weight,
+                existing.RealObservations,
+                (int)weight,
                 at)
-            : new Evidence(0, weight, at);
+            : new Evidence(0, weight, 0, (int)weight, at);
     }
 
     private List<WeightedFollowUp> Weigh(Dictionary<string, Evidence> followUps, DateTimeOffset at) =>
@@ -515,7 +529,11 @@ public sealed class ActionPatternEngine
             .Select(entry =>
             {
                 var factor = DecayFactor(entry.Value.At, at, _options.PatternHalfLife);
-                return new WeightedFollowUp(entry.Key, entry.Value.Real * factor, entry.Value.Demo * factor);
+                return new WeightedFollowUp(
+                    entry.Key,
+                    entry.Value.Real * factor,
+                    entry.Value.Demo * factor,
+                    entry.Value.Observations);
             })
             .Where(entry => entry.Total > 0)
             .ToList();

@@ -64,6 +64,13 @@ public sealed class LiveStateService : IDisposable
     public string? HighlightZone { get; set; }
     public HashSet<AnomalySeverity> HiddenSeverities { get; } = [];
     public string? SelectedDeviceId { get; set; }
+    public string MeshQuery { get; set; } = "";
+    public string MeshSubnet { get; set; } = "";
+    public string MeshAlgorithm { get; set; } = "bfs";
+    public bool MeshShowShortest { get; set; } = true;
+    public string MeshHistoryQuery { get; set; } = "";
+    public DateTime MeshHistoryFrom { get; set; } = DateTime.UtcNow.AddHours(-1);
+    public DateTime MeshHistoryTo { get; set; } = DateTime.UtcNow;
 
     public void ToggleHiddenSeverity(AnomalySeverity severity)
     {

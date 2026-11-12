@@ -7,30 +7,35 @@
 <div class="dashboard">
     <header class="dashboard-header">
         <div class="brand"><span class="logo-mark">◈</span> Smart-X gateway</div>
-        <button class="registration-toggle-btn" @onclick="() => _showRegistrationForm = !_showRegistrationForm">
-            + Register sensor
-        </button>
-        <button class="test-data-btn" @onclick="() => _showDeviceImport = !_showDeviceImport">
-            Import .txt device list
-        </button>
-        @if (_seederRunning)
-        {
-            <button class="test-data-btn" @onclick="StopSeeder" style="color: var(--red); border-color: var(--red);" disabled="@_busy">
-                ⏹ Stop seeder
+        <div class="header-actions">
+            <button class="registration-toggle-btn" @onclick="() => _showRegistrationForm = !_showRegistrationForm">
+                + Register sensor
             </button>
-        }
-        else
-        {
-            <button class="test-data-btn" @onclick="StartSeeder" style="color: var(--green); border-color: var(--green);" disabled="@_busy">
-                ▶ Start seeder
-            </button>
-        }
-        <button class="test-data-btn" @onclick="ClearAllDevices" style="color: var(--orange); border-color: var(--orange);" disabled="@_busy">
-            🗑 Clear all devices
-        </button>
-        <button class="test-data-btn" @onclick="ReloadFromApi" style="color: var(--accent); border-color: var(--accent-dim);" disabled="@_busy">
-            🔄 Reload from API
-        </button>
+            <div class="dev-tools">
+                <span class="dev-tools-label">Tools</span>
+                <button class="dev-btn" @onclick="() => _showDeviceImport = !_showDeviceImport">
+                    Import .txt device list
+                </button>
+                @if (_seederRunning)
+                {
+                    <button class="dev-btn dev-btn-danger" @onclick="StopSeeder" style="color: var(--red); border-color: var(--red);" disabled="@_busy">
+                        ⏹ Stop seeder
+                    </button>
+                }
+                else
+                {
+                    <button class="dev-btn" @onclick="StartSeeder" style="color: var(--green); border-color: var(--green);" disabled="@_busy">
+                        ▶ Start seeder
+                    </button>
+                }
+                <button class="dev-btn dev-btn-danger" @onclick="ClearAllDevices" style="color: var(--orange); border-color: var(--orange);" disabled="@_busy">
+                    🗑 Clear all devices
+                </button>
+                <button class="dev-btn" @onclick="ReloadFromApi" style="color: var(--accent); border-color: var(--accent-dim);" disabled="@_busy">
+                    🔄 Reload from API
+                </button>
+            </div>
+        </div>
     </header>
     <div class="metric-row">
         <MetricCard Label="Active sensors" Value="@_activeSensors.ToString()" Icon="◉" Accent="green" Hint="registered and reporting" />

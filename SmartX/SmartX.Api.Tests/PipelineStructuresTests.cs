@@ -136,7 +136,7 @@ public class PipelineStructuresTests
         var log = new SortedHistoryLog(capacityPerDevice: 5);
         var start = DateTimeOffset.UtcNow;
 
-        // Insert out of order on purpose; the SortedDictionary keeps them ordered.
+        // Insert out of order on purpose; the AVL tree keeps them ordered.
         foreach (var offset in new[] { 3, 1, 5, 2, 4, 7, 6 })
         {
             log.Append("D1", offset, AnomalySeverity.Healthy, start.AddSeconds(offset));
@@ -160,5 +160,9 @@ public class PipelineStructuresTests
         log.Append("D1", 2, AnomalySeverity.Healthy, at);
 
         Assert.Equal(2, log.CountFor("D1"));
+        var points = log.Latest("D1", 2);
+        Assert.All(points, point => Assert.Equal(at, point.Timestamp));
+        Assert.Equal(new[] { 1.0, 2.0 }, points.Select(point => point.Value));
+        Assert.Equal(2, log.Range("D1", at, at).Points.Count);
     }
 }

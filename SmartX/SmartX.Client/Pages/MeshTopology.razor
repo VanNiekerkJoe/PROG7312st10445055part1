@@ -4,6 +4,7 @@
 @using SmartX.Core.Storage
 @using SmartX.Client.Components
 @inject MeshApiClient MeshApi
+@inject LiveStateService Live
 @implements IDisposable
 
 <div class="dashboard cs-page">
@@ -55,22 +56,46 @@
             <section class="panel mesh-map-panel">
                 <p class="panel-title">Live mesh <span class="cs-count">thick green = minimum spanning tree</span></p>
 
-                <svg class="mesh-svg" viewBox="0 0 760 580" role="img" aria-label="Mesh network graph">
+                <svg class="mesh-svg" viewBox="0 0 760 580" role="img" aria-label="Interactive mesh network graph">
+                    <defs>
+                        <radialGradient id="meshGlow">
+                            <stop offset="0%" stop-color="#d8a832" stop-opacity=".10" />
+                            <stop offset="100%" stop-color="#d8a832" stop-opacity="0" />
+                        </radialGradient>
+                    </defs>
+                    <circle cx="380" cy="290" r="285" fill="url(#meshGlow)" />
+                    <circle cx="380" cy="290" r="120" class="mesh-orbit" />
+                    <circle cx="380" cy="290" r="205" class="mesh-orbit" />
+
                     @foreach (var edge in _topo.Edges)
                     {
                         if (!_pos.TryGetValue(edge.A, out var a) || !_pos.TryGetValue(edge.B, out var b)) { continue; }
                         var key = EdgeKey(edge.A, edge.B);
                         var touchesDown = _downSet.Contains(edge.A) || _downSet.Contains(edge.B);
                         <line class="@EdgeClass(edge, key, touchesDown)" x1="@F(a.X)" y1="@F(a.Y)" x2="@F(b.X)" y2="@F(b.Y)" />
-                        @if (_topo.Nodes.Count <= 30 && !touchesDown)
+                    }
+
+                    @if (_topo.Nodes.Count <= 30)
+                    {
+                        @foreach (var edge in _topo.Edges)
                         {
-                            <g><text class="mesh-cost" x="@F((a.X + b.X) / 2)" y="@F((a.Y + b.Y) / 2)">@edge.Cost</text></g>
+                            if (_downSet.Contains(edge.A) || _downSet.Contains(edge.B)
+                                || !_pos.TryGetValue(edge.A, out var a) || !_pos.TryGetValue(edge.B, out var b)) { continue; }
+                            var label = CostLabelPosition(a, b);
+                            <g class="mesh-cost-marker" transform="translate(@F(label.X) @F(label.Y))">
+                                <rect x="-11" y="-8" width="22" height="16" rx="8" />
+                                <text class="mesh-cost" y="3">@edge.Cost</text>
+                            </g>
                         }
                     }
 
                     @foreach (var label in _subnetLabels)
                     {
-                        <g><text class="mesh-subnet" x="@F(label.X)" y="@F(label.Y)">@label.Name</text></g>
+                        var tagWidth = Math.Max(90, label.Name.Length * 7 + 22);
+                        <g class="mesh-subnet-tag" transform="translate(@F(label.X) @F(label.Y))">
+                            <rect x="@F(-tagWidth / 2)" y="-12" width="@F(tagWidth)" height="24" rx="12" />
+                            <text class="mesh-subnet" y="4">@label.Name</text>
+                        </g>
                     }
 
                     @foreach (var node in _topo.Nodes)
@@ -88,8 +113,8 @@
                             }
                             else
                             {
-                                <circle r="15" class="mesh-dot" />
-                                <g><text class="mesh-label" y="4">@ShortLabel(node.Id)</text></g>
+                                <circle r="17" class="mesh-dot" />
+                                <g><text class="mesh-label" y="4">@NodeLabel(node.Id)</text></g>
                             }
                         </g>
                     }
@@ -101,7 +126,7 @@
                     <span><i class="lg lg-path"></i> selected route</span>
                     <span><i class="lg lg-old"></i> route before the failure</span>
                     <span><i class="lg lg-short"></i> cheapest path for this node</span>
-                    <span class="mesh-hint">Click a node to track it. Numbers on links are relative transmit power.</span>
+                    <span class="mesh-hint">Select a node for route details. Link costs are relative transmit power.</span>
                 </div>
             </section>
 
@@ -109,11 +134,11 @@
                 <section class="panel">
                     <p class="panel-title">Route tracker</p>
                     <input class="cs-input" type="search" placeholder="MAC address or device ID"
-                           @bind="_query" @bind:event="oninput" @onkeydown="OnQueryKey" />
+                           @bind="Live.MeshQuery" @bind:event="oninput" @onkeydown="OnQueryKey" />
                     <div class="mesh-btn-row">
-                        <button class="btn btn-blue btn-sm" @onclick="() => TrackAsync(_query)" disabled="@(_busy || string.IsNullOrWhiteSpace(_query))">Track route</button>
-                        <button class="btn btn-red btn-sm" @onclick="FailSelectedAsync" disabled="@(_busy || string.IsNullOrWhiteSpace(_query))">Fail node</button>
-                        <button class="btn btn-green btn-sm" @onclick="RestoreSelectedAsync" disabled="@(_busy || string.IsNullOrWhiteSpace(_query))">Restore</button>
+                        <button class="btn btn-blue btn-sm" @onclick="() => TrackAsync(Live.MeshQuery)" disabled="@(_busy || string.IsNullOrWhiteSpace(Live.MeshQuery))">Track route</button>
+                        <button class="btn btn-red btn-sm" @onclick="FailSelectedAsync" disabled="@(_busy || string.IsNullOrWhiteSpace(Live.MeshQuery))">Fail node</button>
+                        <button class="btn btn-green btn-sm" @onclick="RestoreSelectedAsync" disabled="@(_busy || string.IsNullOrWhiteSpace(Live.MeshQuery))">Restore</button>
                     </div>
 
                     @if (_route is not null)
@@ -145,7 +170,7 @@
                                 <p class="mesh-sub">Cheapest path for this node (cost @_route.ShortestCost)</p>
                                 <p class="mesh-path mesh-path-short">@string.Join(" \u2192 ", _route.ShortestPath)</p>
                                 <label class="mesh-check">
-                                    <input type="checkbox" checked="@_showShortest" @onchange="OnShowShortestChanged" /> Draw it on the map
+                                    <input type="checkbox" checked="@Live.MeshShowShortest" @onchange="OnShowShortestChanged" /> Draw it on the map
                                 </label>
                             }
                             @if (_route.Rerouted && _route.NormalPath.Count > 0)
@@ -165,14 +190,14 @@
                 <section class="panel">
                     <p class="panel-title">Reachability <span class="cs-count">graph traversal</span></p>
                     <div class="cs-filter-row">
-                        <select class="cs-input" aria-label="Subnet" @bind="_subnet">
+                        <select class="cs-input" aria-label="Subnet" @bind="Live.MeshSubnet">
                             <option value="">Whole network</option>
                             @foreach (var s in _subnets)
                             {
                                 <option value="@s">@s</option>
                             }
                         </select>
-                        <select class="cs-input" aria-label="Algorithm" @bind="_algo">
+                        <select class="cs-input" aria-label="Algorithm" @bind="Live.MeshAlgorithm">
                             <option value="bfs">BFS (fewest hops)</option>
                             <option value="dfs">DFS (follow chains)</option>
                         </select>
@@ -222,15 +247,15 @@
         <section class="panel">
             <p class="panel-title">Telemetry history <span class="cs-count">AVL tree range query</span></p>
             <div class="mesh-hist-controls">
-                <input class="cs-input" type="search" placeholder="MAC address or device ID" @bind="_histQuery" />
-                <label class="mesh-field">From (UTC)<input class="cs-input" type="datetime-local" @bind="_from" /></label>
-                <label class="mesh-field">To (UTC)<input class="cs-input" type="datetime-local" @bind="_to" /></label>
+                <input class="cs-input" type="search" placeholder="MAC address or device ID" @bind="Live.MeshHistoryQuery" />
+                <label class="mesh-field">From (UTC)<input class="cs-input" type="datetime-local" @bind="Live.MeshHistoryFrom" /></label>
+                <label class="mesh-field">To (UTC)<input class="cs-input" type="datetime-local" @bind="Live.MeshHistoryTo" /></label>
                 <div class="mesh-btn-row">
                     <button class="btn btn-ghost btn-sm" @onclick="() => SetWindow(15)">Last 15 min</button>
                     <button class="btn btn-ghost btn-sm" @onclick="() => SetWindow(60)">Last hour</button>
                     <button class="btn btn-ghost btn-sm" @onclick="() => SetWindow(180)">Last 3 h</button>
-                    <button class="btn btn-blue btn-sm" @onclick="QueryHistoryAsync" disabled="@(_busy || string.IsNullOrWhiteSpace(_histQuery))">Run query</button>
-                    <button class="btn btn-amber btn-sm" @onclick="BackfillAsync" disabled="@(_busy || string.IsNullOrWhiteSpace(_histQuery))" title="Adds 1,500 synthetic readings over the last 6 hours">Backfill demo data</button>
+                    <button class="btn btn-blue btn-sm" @onclick="QueryHistoryAsync" disabled="@(_busy || string.IsNullOrWhiteSpace(Live.MeshHistoryQuery))">Run query</button>
+                    <button class="btn btn-amber btn-sm" @onclick="BackfillAsync" disabled="@(_busy || string.IsNullOrWhiteSpace(Live.MeshHistoryQuery))" title="Adds 1,500 synthetic readings over the last 6 hours">Backfill demo data</button>
                 </div>
             </div>
 
@@ -305,15 +330,7 @@
     private HashSet<string> _pathEdges = [];
     private HashSet<string> _oldPathEdges = [];
     private HashSet<string> _shortEdges = [];
-    private bool _showShortest = true;
-
-    private string _query = "";
-    private string _subnet = "";
-    private string _algo = "bfs";
-    private string _histQuery = "";
-    private DateTime _from = DateTime.UtcNow.AddHours(-1);
-    private DateTime _to = DateTime.UtcNow;
-
+    private Dictionary<string, string> _nodeLabels = new(StringComparer.Ordinal);
     private bool _busy;
     private bool _loading = true;
     private string? _message;
@@ -323,6 +340,16 @@
     {
         await RefreshAsync();
         _loading = false;
+        if (Live.SelectedDeviceId is not null)
+        {
+            Live.MeshQuery = Live.SelectedDeviceId;
+        }
+
+        if (!string.IsNullOrWhiteSpace(Live.MeshQuery))
+        {
+            await TrackAsync(Live.MeshQuery);
+        }
+
         _ = PollAsync();
     }
 
@@ -378,9 +405,14 @@
             return;
         }
 
-        _query = idOrMac;
-        _histQuery = idOrMac;
+        Live.MeshQuery = idOrMac;
+        Live.MeshHistoryQuery = idOrMac;
         _route = await MeshApi.GetRouteAsync(idOrMac.Trim(), _cts.Token);
+        if (_route is { Found: true, DeviceId: not null })
+        {
+            Live.SelectedDeviceId = _route.DeviceId;
+        }
+
         BuildPathSets();
     }
 
@@ -394,7 +426,7 @@
 
     private void OnShowShortestChanged(ChangeEventArgs e)
     {
-        _showShortest = e.Value is true;
+        Live.MeshShowShortest = e.Value is true;
         BuildPathSets();
     }
 
@@ -402,19 +434,19 @@
     {
         if (e.Key == "Enter")
         {
-            await TrackAsync(_query);
+            await TrackAsync(Live.MeshQuery);
         }
     }
 
     private async Task FailSelectedAsync()
     {
         _busy = true;
-        var ok = await MeshApi.FailAsync(_query.Trim(), _cts.Token);
-        Toast(ok ? $"{_query.Trim()} marked as failed. The mesh is re-routing." : $"No sensor matches \"{_query.Trim()}\".", ok);
+        var ok = await MeshApi.FailAsync(Live.MeshQuery.Trim(), _cts.Token);
+        Toast(ok ? $"{Live.MeshQuery.Trim()} marked as failed. The mesh is re-routing." : $"No sensor matches \"{Live.MeshQuery.Trim()}\".", ok);
         await LoadTopologyAsync();
         if (ok)
         {
-            await TrackAsync(_query);
+            await TrackAsync(Live.MeshQuery);
             if (_reach is not null)
             {
                 await RunReachabilityAsync();
@@ -427,12 +459,12 @@
     private async Task RestoreSelectedAsync()
     {
         _busy = true;
-        var ok = await MeshApi.RestoreAsync(_query.Trim(), _cts.Token);
-        Toast(ok ? $"{_query.Trim()} restored." : $"No sensor matches \"{_query.Trim()}\".", ok);
+        var ok = await MeshApi.RestoreAsync(Live.MeshQuery.Trim(), _cts.Token);
+        Toast(ok ? $"{Live.MeshQuery.Trim()} restored." : $"No sensor matches \"{Live.MeshQuery.Trim()}\".", ok);
         await LoadTopologyAsync();
         if (ok)
         {
-            await TrackAsync(_query);
+            await TrackAsync(Live.MeshQuery);
             if (_reach is not null)
             {
                 await RunReachabilityAsync();
@@ -448,9 +480,9 @@
         var ok = await MeshApi.RestoreAllAsync(_cts.Token);
         Toast(ok ? "All simulated outages cleared." : "Could not reach the API.", ok);
         await LoadTopologyAsync();
-        if (!string.IsNullOrWhiteSpace(_query))
+        if (!string.IsNullOrWhiteSpace(Live.MeshQuery))
         {
-            await TrackAsync(_query);
+            await TrackAsync(Live.MeshQuery);
         }
 
         _busy = false;
@@ -459,30 +491,30 @@
     private async Task RunReachabilityAsync()
     {
         _busy = true;
-        _reach = await MeshApi.GetReachableAsync(string.IsNullOrWhiteSpace(_subnet) ? null : _subnet, _algo == "dfs", _cts.Token);
+        _reach = await MeshApi.GetReachableAsync(string.IsNullOrWhiteSpace(Live.MeshSubnet) ? null : Live.MeshSubnet, Live.MeshAlgorithm == "dfs", _cts.Token);
         _busy = false;
     }
 
     private void SetWindow(int minutes)
     {
-        _to = DateTime.UtcNow;
-        _from = _to.AddMinutes(-minutes);
+        Live.MeshHistoryTo = DateTime.UtcNow;
+        Live.MeshHistoryFrom = Live.MeshHistoryTo.AddMinutes(-minutes);
     }
 
     private async Task QueryHistoryAsync()
     {
         _busy = true;
-        var from = new DateTimeOffset(DateTime.SpecifyKind(_from, DateTimeKind.Utc));
-        var to = new DateTimeOffset(DateTime.SpecifyKind(_to, DateTimeKind.Utc));
-        _history = await MeshApi.GetHistoryRangeAsync(_histQuery.Trim(), from, to, _cts.Token);
+        var from = new DateTimeOffset(DateTime.SpecifyKind(Live.MeshHistoryFrom, DateTimeKind.Utc));
+        var to = new DateTimeOffset(DateTime.SpecifyKind(Live.MeshHistoryTo, DateTimeKind.Utc));
+        _history = await MeshApi.GetHistoryRangeAsync(Live.MeshHistoryQuery.Trim(), from, to, _cts.Token);
         _busy = false;
     }
 
     private async Task BackfillAsync()
     {
         _busy = true;
-        var ok = await MeshApi.BackfillAsync(_histQuery.Trim(), _cts.Token);
-        Toast(ok ? "Added 1,500 readings across the last 6 hours. Run a query to see them." : $"No sensor matches \"{_histQuery.Trim()}\".", ok);
+        var ok = await MeshApi.BackfillAsync(Live.MeshHistoryQuery.Trim(), _cts.Token);
+        Toast(ok ? "Added 1,500 readings across the last 6 hours. Run a query to see them." : $"No sensor matches \"{Live.MeshHistoryQuery.Trim()}\".", ok);
         _busy = false;
     }
 
@@ -498,6 +530,7 @@
         const double cx = 380, cy = 290;
         var pos = new Dictionary<string, (double X, double Y)>(StringComparer.Ordinal);
         var labels = new List<(string Name, double X, double Y)>();
+        var nodeLabels = new Dictionary<string, string>(StringComparer.Ordinal);
 
         var gateway = topo.Nodes.FirstOrDefault(n => n.IsGateway);
         if (gateway is not null)
@@ -515,6 +548,7 @@
         var step = 2 * Math.PI / Math.Max(1, slots);
         var twoRings = groups.Any(g => g.Nodes.Count > 8);
         var slot = 0;
+        var nodeIndex = 0;
 
         foreach (var (name, nodes) in groups)
         {
@@ -524,6 +558,7 @@
                 var angle = -Math.PI / 2 + step * slot;
                 var radius = twoRings ? (i % 2 == 0 ? 240 : 160) : 205;
                 pos[nodes[i].Id] = (cx + radius * Math.Cos(angle), cy + radius * Math.Sin(angle));
+                nodeLabels[nodes[i].Id] = $"N{++nodeIndex:00}";
             }
 
             var mid = -Math.PI / 2 + step * (first + (nodes.Count - 1) / 2.0);
@@ -534,14 +569,28 @@
 
         _pos = pos;
         _subnetLabels = labels;
+        _nodeLabels = nodeLabels;
         BuildPathSets();
     }
+
+    private static (double X, double Y) CostLabelPosition((double X, double Y) a, (double X, double Y) b)
+    {
+        var dx = b.X - a.X;
+        var dy = b.Y - a.Y;
+        var length = Math.Sqrt(dx * dx + dy * dy);
+        return length == 0
+            ? ((a.X + b.X) / 2, (a.Y + b.Y) / 2)
+            : ((a.X + b.X) / 2 - dy / length * 11, (a.Y + b.Y) / 2 + dx / length * 11);
+    }
+
+    private string NodeLabel(string id) =>
+        _nodeLabels.TryGetValue(id, out var label) ? label : ShortLabel(id);
 
     private void BuildPathSets()
     {
         _pathEdges = PathKeys(_route?.LivePath);
         _oldPathEdges = _route is { Rerouted: true } ? PathKeys(_route.NormalPath) : [];
-        _shortEdges = _showShortest && _route is { ShortestPath.Count: > 0 } && _route.ShortestCost < _route.LiveCost
+        _shortEdges = Live.MeshShowShortest && _route is { ShortestPath.Count: > 0 } && _route.ShortestCost < _route.LiveCost
             ? PathKeys(_route.ShortestPath)
             : [];
     }

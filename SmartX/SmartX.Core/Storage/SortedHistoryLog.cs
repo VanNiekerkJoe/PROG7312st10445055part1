@@ -6,7 +6,7 @@ public sealed record HistoryPoint(DateTimeOffset Timestamp, double Value, Anomal
 
 /// <summary>
 /// Historical sensor logs. Part 3 upgrade: each device's history is now an
-/// <see cref="AvlTree{TKey,TValue}"/> keyed by timestamp instead of a SortedDictionary
+/// <see cref="AvlTree{TKey,TValue}"/> keyed by timestamp and arrival sequence instead of a SortedDictionary
 /// (a red-black tree we could not look inside). The self-balancing tree keeps entries
 /// ordered as they arrive, so:
 ///   - Append is O(log n), and so is evicting the oldest point once the cap is reached;
@@ -18,7 +18,17 @@ public sealed record HistoryPoint(DateTimeOffset Timestamp, double Value, Anomal
 public sealed class SortedHistoryLog(int capacityPerDevice = 5000)
 {
     private readonly object _lock = new();
-    private readonly Dictionary<string, AvlTree<DateTimeOffset, HistoryPoint>> _byDevice = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, AvlTree<HistoryKey, HistoryPoint>> _byDevice = new(StringComparer.Ordinal);
+    private long _sequence;
+
+    private readonly record struct HistoryKey(DateTimeOffset Timestamp, long Sequence) : IComparable<HistoryKey>
+    {
+        public int CompareTo(HistoryKey other)
+        {
+            var timestampOrder = Timestamp.CompareTo(other.Timestamp);
+            return timestampOrder != 0 ? timestampOrder : Sequence.CompareTo(other.Sequence);
+        }
+    }
 
     public void Append(string deviceId, double value, AnomalySeverity severity, DateTimeOffset? at = null)
     {
@@ -26,17 +36,12 @@ public sealed class SortedHistoryLog(int capacityPerDevice = 5000)
         {
             if (!_byDevice.TryGetValue(deviceId, out var log))
             {
-                log = new AvlTree<DateTimeOffset, HistoryPoint>();
+                log = new AvlTree<HistoryKey, HistoryPoint>();
                 _byDevice[deviceId] = log;
             }
 
             var timestamp = at ?? DateTimeOffset.UtcNow;
-            while (log.ContainsKey(timestamp))
-            {
-                timestamp = timestamp.AddTicks(1); // keys must be unique
-            }
-
-            log.Set(timestamp, new HistoryPoint(timestamp, value, severity));
+            log.Set(new HistoryKey(timestamp, ++_sequence), new HistoryPoint(timestamp, value, severity));
 
             while (log.Count > capacityPerDevice && log.TryGetMin(out var oldest, out _))
             {
@@ -66,7 +71,9 @@ public sealed class SortedHistoryLog(int capacityPerDevice = 5000)
                 return ([], new RangeStats(0, 0, 0, 0));
             }
 
-            var (items, stats) = log.Range(from, to);
+            var (items, stats) = log.Range(
+                new HistoryKey(from, long.MinValue),
+                new HistoryKey(to, long.MaxValue));
             return (items.Select(pair => pair.Value).ToList(), stats);
         }
     }

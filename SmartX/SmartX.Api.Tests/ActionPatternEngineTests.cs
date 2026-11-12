@@ -47,6 +47,7 @@ public class ActionPatternEngineTests
         var learned = Assert.Single(suggestions, s => s.Basis == "learned");
         Assert.Equal("P2", learned.DeviceId);
         Assert.Equal(CommandType.RelayOff, learned.Command);
+        Assert.Equal(3, learned.Observations);
         Assert.Equal(0.75, learned.Confidence);
         Assert.Contains("reading 500", learned.Detail);
         Assert.Contains("z-score +4.00", learned.Detail);
@@ -132,6 +133,7 @@ public class ActionPatternEngineTests
         var learned = Assert.Single(suggestions);
         Assert.Equal("ACT1", learned.DeviceId);
         Assert.Equal(CommandType.PumpOn, learned.Command);
+        Assert.Equal(2, learned.Observations);
     }
 
     [Fact]

@@ -1102,10 +1102,23 @@ body {
     .header-actions {
         margin-left: 0;
         width: 100%;
+        align-items: flex-start;
     }
 
     .dev-tools {
-        flex-wrap: wrap;
+        flex: 1 1 100%;
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .dev-tools-label {
+        grid-column: 1 / -1;
+    }
+
+    .dev-tools .dev-btn {
+        width: 100%;
+        min-width: 0;
+        white-space: normal;
     }
 
     .constellation-svg {
@@ -2255,22 +2268,24 @@ a.topnav-link:hover {
 /* ---------------------------------------------------------------- Part 3: mesh topology */
 .mesh-grid { display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 0.9rem; align-items: start; margin-bottom: 0.9rem; }
 .mesh-side { display: flex; flex-direction: column; gap: 0.9rem; min-width: 0; }
-.mesh-svg { width: 100%; height: auto; max-height: 640px; display: block; }
-.mesh-edge { stroke: #2c3945; stroke-width: 1.2; }
-.mesh-edge-mst { stroke: var(--green); stroke-width: 3; opacity: 0.85; }
+.mesh-svg { width: 100%; height: auto; max-height: 640px; display: block; border-radius: 12px; background: radial-gradient(ellipse at center, rgba(28, 42, 52, 0.48), rgba(7, 11, 16, 0.12) 72%); }
+.mesh-orbit { fill: none; stroke: rgba(130, 153, 170, 0.13); stroke-width: 1; stroke-dasharray: 3 8; vector-effect: non-scaling-stroke; }
+.mesh-edge { stroke: #536271; stroke-width: 1.25; opacity: 0.58; vector-effect: non-scaling-stroke; }
+.mesh-edge-mst { stroke: var(--green); stroke-width: 2.8; opacity: 0.92; filter: drop-shadow(0 0 3px rgba(51, 240, 176, 0.25)); }
 .mesh-edge-down { stroke: var(--red); stroke-width: 1; stroke-dasharray: 3 5; opacity: 0.55; }
 .mesh-edge-path { stroke: var(--accent); stroke-width: 5; opacity: 1; stroke-dasharray: 12 8; animation: mesh-flow 0.8s linear infinite; filter: drop-shadow(0 0 5px rgba(216, 168, 50, 0.7)); }
 .mesh-edge-short { stroke: var(--blue, #4aa3ff); stroke-width: 3.5; stroke-dasharray: 2 7; stroke-linecap: round; opacity: 1; }
 .mesh-edge-old { stroke: var(--muted); stroke-width: 3; stroke-dasharray: 7 6; opacity: 0.9; }
-.mesh-cost { fill: var(--muted); font-size: 10px; text-anchor: middle; paint-order: stroke; stroke: var(--panel); stroke-width: 3px; }
+.mesh-cost-marker rect { fill: var(--panel-raised); stroke: var(--border-bright); stroke-width: 1; vector-effect: non-scaling-stroke; }
+.mesh-cost { fill: var(--text); font-size: 9px; font-weight: 700; text-anchor: middle; }
 .mesh-node { cursor: pointer; }
-.mesh-dot { fill: var(--panel-raised); stroke: var(--green); stroke-width: 2.5; transition: stroke 0.2s, fill 0.2s; }
-.mesh-node:hover .mesh-dot { fill: #1d2833; }
+.mesh-dot { fill: var(--panel-raised); stroke: var(--green); stroke-width: 2.5; transition: stroke 0.2s, fill 0.2s, filter 0.2s; }
+.mesh-node:hover .mesh-dot { fill: #1d2833; filter: drop-shadow(0 0 6px rgba(51, 240, 176, 0.35)); }
 .mesh-node-down .mesh-dot { stroke: var(--red); fill: var(--red-soft); }
 .mesh-node-stranded .mesh-dot { stroke: #ff9d4d; stroke-dasharray: 4 3; }
 .mesh-node-selected .mesh-dot { stroke: var(--accent); stroke-width: 4; }
 .mesh-gw { fill: var(--accent-soft); stroke: var(--accent); stroke-width: 2.5; }
-.mesh-label { fill: var(--text); font-size: 10px; font-weight: 600; text-anchor: middle; pointer-events: none; }
+.mesh-label { fill: var(--text); font-size: 9px; font-weight: 700; text-anchor: middle; paint-order: stroke; stroke: var(--panel-raised); stroke-width: 2px; pointer-events: none; }
 .mesh-label-gw { fill: var(--accent); font-size: 12px; }
 .mesh-legend { display: flex; flex-wrap: wrap; gap: 0.4rem 1.1rem; margin-top: 0.5rem; font-size: 0.72rem; color: var(--muted); align-items: center; }
 .mesh-legend .lg { display: inline-block; width: 18px; height: 0; border-top: 3px solid; vertical-align: middle; margin-right: 0.3rem; }
@@ -2309,7 +2324,8 @@ a.topnav-link:hover {
 
 @keyframes mesh-flow { to { stroke-dashoffset: -20; } }
 @media (prefers-reduced-motion: reduce) { .mesh-edge-path { animation: none; stroke-dasharray: none; } }
-.mesh-subnet { fill: var(--muted); font-size: 10px; letter-spacing: 0.08em; text-anchor: middle; text-transform: uppercase; pointer-events: none; }
+.mesh-subnet-tag rect { fill: var(--panel-raised); stroke: var(--border-bright); stroke-width: 1; opacity: 0.96; vector-effect: non-scaling-stroke; }
+.mesh-subnet { fill: var(--accent); font-size: 9px; font-weight: 700; letter-spacing: 0.06em; text-anchor: middle; text-transform: uppercase; pointer-events: none; }
 .mesh-node:focus-visible { outline: none; }
 .mesh-node:focus-visible .mesh-dot, .mesh-node:focus-visible .mesh-gw { stroke: var(--accent); stroke-width: 4; }
 .lg-short { border-color: var(--blue, #4aa3ff); border-top-style: dotted; }

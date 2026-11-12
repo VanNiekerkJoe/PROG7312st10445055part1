@@ -208,6 +208,10 @@
                                     <div class="cs-suggestion-device-head">
                                         <strong>@suggestion.DeviceId</strong>
                                         <span class="cs-chip cs-basis-@suggestion.Basis">@suggestion.Basis</span>
+                                        @if (suggestion.Basis == "learned")
+                                        {
+                                            <span class="cs-chip">@suggestion.Observations @(suggestion.Observations == 1 ? "observation" : "observations")</span>
+                                        }
                                         <span class="cs-confidence-label">@Percent(suggestion.Confidence)</span>
                                         <button class="btn btn-primary btn-sm" disabled="@_busy" @onclick="() => ApplyAsync(suggestion)">Apply</button>
                                     </div>

@@ -63,6 +63,7 @@ public sealed class ActionPatternRankingTests
         var demoSuggestion = Assert.Single(
             engine.Suggest(null, [power]),
             suggestion => suggestion.DeviceId == "P1" && suggestion.Basis == "learned");
+        Assert.Equal(4, demoSuggestion.Observations);
         Assert.Equal(0.8, demoSuggestion.Confidence);
 
         var threeObservationsEngine = new ActionPatternEngine(new ManualTimeProvider(now.AddMinutes(11)));
