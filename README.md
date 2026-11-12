@@ -1,3 +1,5 @@
+<p align="center"><img src="docs/smartx-logo-wordmark.png" alt="Smart-X Secure Operations Console" width="520"></p>
+
 # Smart-X IoT Mesh Ecosystem
 
 A hybrid IoT monitoring platform for distributed environments (hydroponic farms, utility trackers, smart grids). A fleet of ESP32-style sensors reports telemetry to a gateway; operators watch, command and route around failures from a live dashboard.
@@ -6,10 +8,14 @@ A hybrid IoT monitoring platform for distributed environments (hydroponic farms,
 
 | | |
 |---|---|
-| Repository | https://github.com/VanNiekerkJoe/PROG7312st10445055part1 |
-| Demo video (Part 3) | `[PASTE YOUTUBE LINK HERE]` |
-| Stack | .NET 10, ASP.NET Core Minimal API, SignalR, Blazor WebAssembly, Firebase Authentication, xUnit, Docker Compose |
 | Author | Joe Leo van Niekerk (ST10445055) |
+| Repository | https://github.com/VanNiekerkJoe/PROG7312st10445055part1 |
+| Demo video (Part 3) | `[PASTE PART 3 YOUTUBE LINK HERE]` |
+| Demo video (Part 2) | https://www.youtube.com/watch?v=2n1pi6hSRl4 |
+| Demo video (Part 1) | https://www.youtube.com/watch?v=INM5rb1z4wc |
+| Stack | .NET 10, ASP.NET Core Minimal API, SignalR, Blazor WebAssembly, Firebase Authentication, xUnit, Docker Compose |
+| Tests | 73 automated tests, all passing (19 added in Part 3) |
+| Demo login | Supplied in the submission notes (not stored in this repository, see [Configuration](#3-configuration)) |
 
 <!-- Screenshots: add images under docs/images and link them here, for example ![Mesh topology](docs/images/mesh.png) -->
 
@@ -29,14 +35,19 @@ A hybrid IoT monitoring platform for distributed environments (hydroponic farms,
 12. [Docker](#12-docker)
 13. [Troubleshooting](#13-troubleshooting)
 14. [Design trade-offs and known limitations](#14-design-trade-offs-and-known-limitations)
-15. [Rubric mapping](#15-rubric-mapping)
-16. [Project documents](#16-project-documents)
+15. [Changes since Part 2](#15-changes-since-part-2)
+16. [Rubric mapping](#16-rubric-mapping)
+17. [Project documents](#17-project-documents)
+18. [Brand assets](#18-brand-assets)
+19. [References](#20-references)
 
 ---
 
 ## 1. Overview
 
 Smart-X is a hybrid IoT ecosystem for monitoring distributed environments such as hydroponic farms, automated utility trackers and smart grid installations. Thousands of microcontrollers (ESP32-class chips) publish constant, multi-typed telemetry (floats for soil moisture, integers for power wattage, booleans for valve states) to a central gateway. The environment here is a **simulation**: the `SmartX.DeviceSimulator` project posts to the API over HTTP exactly as a physical device would.
+
+The system is built on .NET 10 (Microsoft, n.d.h): an ASP.NET Core Minimal API with SignalR (Microsoft, n.d.b) pushing live updates, a Blazor WebAssembly dashboard (Microsoft, n.d.a), a device simulator and an xUnit test project (xUnit.net, n.d.). All three parts sit under one menu and Firebase sign-in protects every page and every request.
 
 ### What each part delivers
 
@@ -56,11 +67,12 @@ The design is driven by how real IoT back ends behave, not by a generic CRUD app
 | **Back-pressure** | A gateway has finite memory. Accepting everything eventually crashes it. | The standard lane has a hard cap (`MaxStandardDepth = 5000`). When it is full, `Enqueue` returns `false` and the API tells the device to retry later. |
 | **Not all readings are equal** | A routine moisture reading can wait. A power spike or a critical moisture drop in a hydroponics node cannot. | **Two-lane ingestion**: critical packets go to a `PriorityQueue` that is always drained first, so they bypass any backlog. |
 | **Anomaly detection at the edge of the pipeline** | Alerts must be raised on arrival, not discovered later. | `TelemetryClassifier` flags a packet as critical at ingest time using a rolling per-device baseline (z-score of 3 or more), an out-of-range value, or a device-reported disconnect. |
-| **Device liveness (heartbeat / last-will)** | A dead node sends nothing, so absence of data is the signal. MQTT solves this with keep-alive and last-will messages. | HTTP has no last-will, so `IngestProcessor` sweeps every 5 s and marks any device silent for more than 20 s as *Disconnected*. |
+| **Device liveness (heartbeat / last-will)** | A dead node sends nothing, so absence of data is the signal. MQTT solves this with keep-alive and last-will messages (OASIS, 2019). | HTTP has no last-will, so `IngestProcessor` sweeps every 5 s and marks any device silent for more than 20 s as *Disconnected*. |
 | **Alert storms** | A node that stays offline would raise the same alert on every sweep and bury operators in duplicates (alert fatigue). | A `HashSet<T>` of active alerts refuses duplicates, and the dashboard shows how many were suppressed. |
 | **Device identity** | Devices identify themselves by hardware address, not by a friendly name. | The device registry is a `Dictionary` keyed by **MAC address**, so every packet resolves its sender in O(1). |
 | **Safe actuation** | Commands change physical state (pumps, valves, relays). Operators make mistakes. | Every command has an exact inverse and is recorded on a `Stack<T>`, giving a one-click undo. |
-| **Protocol choice** | MQTT (publish/subscribe, QoS levels, retained messages) is the usual transport on constrained hardware. | Ingestion is HTTP so the simulator, the browser demo and the tests share one front door. The queue, classifier and device store are transport-agnostic, so an MQTT subscriber could feed `TelemetryIngestQueue` without changing anything downstream. |
+| **Failure of a relay** | In a mesh, one dead node can cut off healthy neighbours. | Part 3 separates *down* (the node itself failed) from *stranded* (alive, but every route to the gateway crosses a failed node) and shows each affected sensor's new route beside its old one. |
+| **Protocol choice** | MQTT (publish/subscribe, QoS levels, retained messages) is the usual transport on constrained hardware (OASIS, 2019). | Ingestion is HTTP so the simulator, the browser demo and the tests share one front door. The queue, classifier and device store are transport-agnostic, so an MQTT subscriber could feed `TelemetryIngestQueue` without changing anything downstream. |
 
 Live and simulated data are interchangeable: any real device that can `POST /api/telemetry/ingest` with its MAC address and a value can be registered and will appear in the dashboard.
 
@@ -104,11 +116,13 @@ dotnet run
 
 # Terminal 3: simulated devices (needs a Firebase operator account)
 cd SmartX.DeviceSimulator
-$env:SMARTX_FIREBASE_EMAIL = "operator@example.com"      # PowerShell
-$env:SMARTX_FIREBASE_PASSWORD = "<your password>"
+$env:SMARTX_FIREBASE_EMAIL = "<operator email>"          # PowerShell
+$env:SMARTX_FIREBASE_PASSWORD = "<operator password>"
 dotnet run                                               # defaults to https://localhost:5001
 # dotnet run -- http://localhost:5000                    # or pass the API URL
 ```
+
+On Linux or macOS use `export SMARTX_FIREBASE_EMAIL="..."` and `export SMARTX_FIREBASE_PASSWORD="..."` instead of the PowerShell lines.
 
 Then open **https://localhost:5173**, create an account or sign in, and use the top navigation bar to move between **Sensor ingestion**, **Command stream** and **Mesh topology**.
 
@@ -116,31 +130,38 @@ Then open **https://localhost:5173**, create an account or sign in, and use the 
 
 Confirm the API's port from its console output. If it differs from `https://localhost:5001`, update `apiBaseAddress` in `SmartX.Client/Program.cs` and `Cors:ClientOrigin` in `SmartX.Api/appsettings.json`.
 
+**Run the tests:** `dotnet test SmartX.Api.Tests` (from the `SmartX` folder).
+
+### Where to find each requirement
+
+| Need | Go to |
+|---|---|
+| Part 3 demo script (graph, MST, healing, BFS/DFS, AVL range query) | [4.3](#43-part-3-mesh-topology-and-routing) |
+| Part 2 structure tests (queue, priority queue, stack, dictionary, set) | [8.2](#82-how-to-test-the-queue-and-dictionary-implementations) |
+| Where each data structure lives in the code | [Section 6](#6-data-structures-what-where-and-why) |
+| Marking rubric | [Section 16](#16-rubric-mapping) |
+
 ---
 
 ## 3. Configuration
 
 ### Browser address and certificate
 
-Open the client at **https://localhost:5173**. The plain-HTTP address (`http://localhost:5172`) is also allowed by the API's CORS policy (`Cors:AdditionalOrigins`), so either works, but any other origin is blocked by the browser. If the browser warns about the certificate, or sign-in says it could not contact Firebase authentication, trust the .NET development certificate once and restart the browser and the API:
+Open the client at **https://localhost:5173**. The plain-HTTP address (`http://localhost:5172`) is also allowed by the API's CORS policy (`Cors:AdditionalOrigins`; Microsoft, n.d.f), so either works, but any other origin is blocked by the browser. If the browser warns about the certificate, or sign-in says it could not contact Firebase authentication, trust the .NET development certificate once and restart the browser and the API:
 
 ```
 dotnet dev-certs https --trust
 ```
 
-The dashboard uses Firebase email/password authentication. The Firebase project ID and Web API key are included in `SmartX/SmartX.Api/appsettings.json` so a fresh clone can run without local user-secrets. The Web API key is an identifier used by client applications, not an account credential; restrict it in Google Cloud Console to the **Identity Toolkit API** and the **Token Service API** (the second one refreshes sign-in sessions). All sensor, telemetry, command, insight, and SignalR hub operations require a valid Firebase ID token.
+### Firebase authentication
+
+The dashboard uses Firebase email/password authentication (Google, n.d.a; n.d.b). The Firebase project ID and Web API key are included in `SmartX/SmartX.Api/appsettings.json` so a fresh clone can run without local user-secrets. The Web API key is an identifier used by client applications, not an account credential; restrict it in Google Cloud Console to the **Identity Toolkit API** and the **Token Service API** (the second one refreshes sign-in sessions). All sensor, telemetry, command, insight, mesh and SignalR hub operations require a valid Firebase ID token.
 
 In Firebase Console, enable the **Email/Password** sign-in provider. The sign-in screen can create an account or sign in an existing operator, so a marker can register an account. Provide a demo operator account's credentials in your submission notes, not in this repository. The API validates token signature, issuer, audience, and expiry against the configured project. The root health endpoint and `/api/auth/config` remain public; dashboard APIs and both hubs are protected.
 
+For SignalR, browsers cannot attach a normal authorisation header to a WebSocket connection, so the token is passed in the connection address for the hub connections only.
+
 The attachment encryption key in `appsettings.json` is a development key; replace it with a securely managed key for production. The device simulator also authenticates. Set `SMARTX_FIREBASE_EMAIL` and `SMARTX_FIREBASE_PASSWORD` in its process environment to a Firebase operator account before starting it. It obtains and refreshes its ID token automatically. Do not put account passwords in source files.
-
-On **Sensor ingestion**, choose **Import .txt device list** and select a UTF-8 text file containing one tab-separated device per line:
-
-```
-subZoneId<TAB>MAC address<TAB>category<TAB>location description
-```
-
-For example, a row may contain `SUB-ZONE-1`, `24:6F:28:AA:BB:CC`, `Environmental`, and `North greenhouse`, separated by literal tab characters. The header row is optional. Categories are `Environmental`, `Power`, and `Actuator`. Files are limited to 1 MB and 500 device rows. Valid rows are registered independently, successful devices appear immediately in the constellation, and failed rows are reported with their line numbers.
 
 ---
 
@@ -150,14 +171,33 @@ A top navigation bar (`NavMenu`, hosted in `MainLayout`) appears on every page. 
 
 | Module | Part | Purpose |
 |---|---|---|
-| Home | all | Pillar menu |
+| Home | all | Pillar menu, with a link to each module |
 | Sensor ingestion | 1 | Register devices, the sensor constellation, attachments |
 | Command stream | 2 | Live pipeline, overrides, undo, suggestions |
 | Mesh topology | 3 | Mesh map, routing, reachability, historical queries |
 
 ### 4.1 Sensor ingestion (Part 1)
 
-Register devices under a sub-zone one at a time or by importing a text list, watch every sensor in the live constellation, and attach config files, photos or logs to a device. See [Part 1 notes](#9-part-1-notes).
+Register devices under a sub-zone one at a time or by importing a text list, watch every sensor in the live constellation, and attach config files, photos or logs to a device. See also [Part 1 notes](#9-part-1-notes).
+
+**Registering a device.** The form loads from a cache, the new device appears on the constellation the moment it is saved (a short flash and expanding ring show where it landed), and the form stays open so several devices can be registered in a row.
+
+**Importing a device list.** Choose **Import .txt device list** and select a UTF-8 text file containing one tab-separated device per line:
+
+```
+subZoneId<TAB>MAC address<TAB>category<TAB>location description
+```
+
+For example, a row may contain `ZA-SUB1`, `24:6F:28:AA:BB:CC`, `Environmental`, and `North greenhouse`, separated by literal tab characters. The sub-zone must already exist. The built-in ones are `ZA-SUB1` (Hydroponic Bay), `ZB-SUB1` (Utility Room), `ZB-SUB2` (Valve Bank) and `ZC-SUB1` (Grid Substation). The header row is optional. Categories are `Environmental`, `Power`, and `Actuator`. Files are limited to 1 MB and 500 device rows. Valid rows are registered independently, successful devices appear immediately in the constellation, and failed rows are reported with their line numbers.
+
+Two ready-made files are in `sample-data/`:
+
+| File | Contents | Expected result |
+|---|---|---|
+| `devices.txt` | 24 valid devices | Every line registers |
+| `devices-with-errors.txt` | Seven lines with a duplicate MAC, an unknown sub-zone, a malformed MAC, an unknown category and a missing column | Only two lines register; the rest are reported with line numbers |
+
+Importing `devices.txt` a second time reports every line as a duplicate, because the MAC address is the registry key.
 
 ### 4.2 Command stream (Part 2)
 
@@ -166,8 +206,8 @@ Register devices under a sub-zone one at a time or by importing a text list, wat
 - **Device list with search and filter:** free-text search across device ID, zone, category and state, plus category and state dropdowns, with a live `matches / total` counter.
 - **Manual overrides:** Pump ON/OFF, Relay ON/OFF, Valve OPEN/CLOSE against the selected device.
 - **Undo last command:** pops the stack and issues the inverse command.
-- **Timeline graph:** the selected device's recent readings, read straight from the sorted history structure, with amber/red dots for non-healthy readings.
-- **Suggested actions / Automated insights:** ranked recommendations with a confidence bar and an **Apply** button.
+- **Timeline graph:** the selected device's recent readings, read straight from the timestamp-ordered history tree, with amber/red dots for non-healthy readings.
+- **Suggested actions / Automated insights:** ranked recommendations with a confidence bar, the number of times each pattern has been observed, and an **Apply** button.
 - **Demo controls:** *Flood queue (2000 packets)*, *Fire priority alert on selected*, *Train demo patterns*.
 
 Step-by-step checks for every data structure are in [How to test the queue and dictionary implementations](#82-how-to-test-the-queue-and-dictionary-implementations).
@@ -217,7 +257,7 @@ flowchart LR
     MESH -->|GET /api/mesh| UI
 ```
 
-**Processing loop.** Every 100 ms `IngestProcessor` handles a bounded batch of up to 50 packets (about 500 packets per second), which models a resource-constrained gateway. Critical packets are always dequeued first. Within a tick, only the latest status per device is broadcast, so a burst of hundreds of packets for one device becomes one SignalR message.
+**Processing loop.** Every 100 ms `IngestProcessor`, a hosted background service (Microsoft, n.d.c), handles a bounded batch of up to 50 packets (about 500 packets per second), which models a resource-constrained gateway. Critical packets are always dequeued first. Within a tick, only the latest status per device is broadcast, so a burst of hundreds of packets for one device becomes one SignalR message. Every 5 s a sweep marks devices silent for more than 20 s as *Disconnected*.
 
 **Mesh layer.** `MeshTopologyService` builds the graph from the same deployment tree the registry holds, so a device registered or removed in Part 1 appears in or leaves the mesh automatically. See [Part 3 in depth](#7-part-3-in-depth-mesh-topology-and-routing).
 
@@ -243,7 +283,8 @@ SmartX.sln
  SmartX.DeviceSimulator Console app that acts like a fleet of ESP32 nodes
  SmartX.Api.Tests       xUnit tests for Core, the engine and the mesh
  docker-compose.yml     API + client + simulator
-docs/                   Completion report, technology recommendations, update ledger
+docs/                   Logo files, completion report, technology recommendations, update ledger
+sample-data/            devices.txt, devices-with-errors.txt
 ```
 
 Keeping the data structures in `SmartX.Core` means they are unit-testable in isolation, with no web host.
@@ -252,6 +293,8 @@ Keeping the data structures in `SmartX.Core` means they are unit-testable in iso
 
 ## 6. Data structures: what, where and why
 
+The standard collections used here come from the .NET collections library (Microsoft, n.d.d): `Queue<T>` (n.d.j), `PriorityQueue<TElement,TPriority>` (n.d.i), `Stack<T>` (n.d.k), `Dictionary<TKey,TValue>` (n.d.e) and `HashSet<T>` (n.d.g). The tree, heap and graph structures are written by hand and follow standard algorithm texts (Cormen et al., 2022).
+
 | Structure | File | Used for | Complexity | Why this structure |
 |---|---|---|---|---|
 | `Queue<T>` | `Ingestion/TelemetryIngestQueue.cs` | Standard telemetry in strict arrival order | Enqueue / dequeue O(1) | FIFO is exactly the required semantics, and it is bounded for back-pressure. |
@@ -259,12 +302,27 @@ Keeping the data structures in `SmartX.Core` means they are unit-testable in iso
 | `Stack<T>` | `Commands/CommandHistory.cs` | Undo history of manual overrides | Push / pop O(1) | LIFO matches undo: the last command issued is the first reverted. Capped (see below). |
 | `Queue<T>` (capped) | `Commands/CommandHistory.cs` | Audit log shown in the history panel | Append and trim oldest O(1) | Trimming the oldest entry from a `List<T>` with `RemoveAt(0)` is O(n). A queue drops its head in O(1). |
 | `Dictionary<TKey,TValue>` | `Storage/DeviceStateStore.cs` | Registered devices keyed by **MAC address**, plus device ID to MAC | Lookup O(1) average | Every packet must resolve its sender instantly. Scanning the deployment tree would be O(n) per packet. |
-| `AvlTree<TKey,TValue>` (Part 3) | `Storage/AvlTree.cs`, `Storage/SortedHistoryLog.cs` | Per-device history keyed by timestamp, with range queries | Insert / remove / lookup O(log n), range O(log n + k) | A self-balancing tree stays ordered as data arrives, so the dashboard never sorts, and a time-window query touches only the matching part of the history. See [Part 3 in depth](#7-part-3-in-depth-mesh-topology-and-routing). |
+| `AvlTree<TKey,TValue>` (Part 3) | `Storage/AvlTree.cs`, `Storage/SortedHistoryLog.cs` | Per-device history keyed by timestamp (with a sequence number so two readings in the same millisecond never overwrite each other), with range queries. Replaced the Part 2 `SortedDictionary`. | Insert / remove / lookup O(log n), range O(log n + k) | A self-balancing tree stays ordered as data arrives, so the dashboard never sorts, and a time-window query touches only the matching part of the history. See [7.2](#72-historical-data-querying-avl-tree). |
 | `HashSet<T>` | `Storage/ActiveAlertSet.cs` | Active unique alert states (`deviceId\|kind`) | Add / remove / contains O(1) | Sets store unique elements, so a second Disconnected alert for the same sensor is refused automatically. |
 | Nested `Dictionary` | `Insights/ActionPatternEngine.cs` | Transition table `context -> follow-up -> weight` | O(1) update | A sparse table of learned (context, command) pairs. |
 | `MinHeap<TElement,TPriority>` (Part 3) | `Collections/MinHeap.cs` | Candidate-edge queue for Prim's and Dijkstra's algorithms | Enqueue / dequeue O(log n) | Always yields the cheapest link next; hand-written so the sift-up and sift-down logic is ours to explain and test. |
 | Adjacency list (Part 3) | `Mesh/MeshGraph.cs` | The mesh: node to its wireless links | O(V + E) space | A mesh is sparse (each node hears a few neighbours), so a list beats an O(V^2) matrix. |
 | Union-find (Part 3) | `Mesh/MeshGraph.cs` | Cycle detection in Kruskal's algorithm | Near O(1) per operation | Path halving and union by size make "would this link close a loop?" almost free. |
+
+### Structure map (names used in the module guidance)
+
+The module guidance suggests naming each structure by its purpose. Each one lives in `SmartX.Core` and is wrapped by a class that owns it:
+
+| Suggested name | Structure | Class and file | Field |
+|---|---|---|---|
+| **TelemetryQueue** | `Queue<IngestItem>`: FIFO, capped at 5000 for back-pressure | `TelemetryIngestQueue`, `SmartX.Core/Ingestion/TelemetryIngestQueue.cs` | `_standard` |
+| **CriticalAlertQueue** | `PriorityQueue<IngestItem,(int,long)>`: drained before the standard lane, ties served first-come-first-served | `TelemetryIngestQueue`, `SmartX.Core/Ingestion/TelemetryIngestQueue.cs` | `_critical` |
+| **CommandUndoStack** | `Stack<DeviceCommand>`: LIFO undo, capped at 200, undo commands are never pushed | `CommandHistory`, `SmartX.Core/Commands/CommandHistory.cs` | `_undoStack` |
+| **DeviceRegistry** | `Dictionary<string, DeviceState>` keyed by MAC address (plus device ID to MAC), O(1) lookup | `DeviceStateStore`, `SmartX.Core/Storage/DeviceStateStore.cs` | `_byMac`, `_macByDeviceId` |
+| **SensorTimeline** | `AvlTree` per device, kept in timestamp order, 5000 points per device | `SortedHistoryLog`, `SmartX.Core/Storage/SortedHistoryLog.cs` | `_byDevice` |
+| **DisconnectedNodes** | `HashSet<string>` of active error states and disconnected nodes (`deviceId\|kind`), duplicates refused | `ActiveAlertSet`, `SmartX.Core/Storage/ActiveAlertSet.cs` | `_active` |
+
+`IngestProcessor` (`SmartX.Api/Services/IngestProcessor.cs`) ties them together: it drains the critical lane first, resolves each packet's device through the registry, appends to the timeline, and raises alerts through the set. The operator's command history feeds the `ActionPatternEngine` ([section 8.3](#83-predictive-action-and-recommendation-engine)).
 
 ### Capacity and bounds
 
@@ -290,11 +348,11 @@ The simulation has no radio hardware, so links are generated from the deployment
 - the last device of one sub-zone also hears the first device of the next, so subnets back each other up when an uplink dies;
 - each link has a cost from 1 to 9 (relative transmit power), from a stable FNV-1a hash of the two endpoints.
 
-A node is **down** when either the ingest pipeline has marked it *Disconnected* (no heartbeat for 20 s, the Part 2 sweep) or an operator has clicked **Fail node**. Devices registered, imported or deleted in Part 1 appear in or leave the mesh automatically, because the graph is rebuilt from the live deployment tree on each request.
+A node is **down** when either the ingest pipeline has marked it *Disconnected* (no heartbeat for 20 s, the Part 2 sweep) or an operator has clicked **Fail node**. A node is **stranded** when it is alive but every route to the gateway passes through a failed node. Devices registered, imported or deleted in Part 1 appear in or leave the mesh automatically, because the graph is rebuilt from the live deployment tree on each request.
 
 ### 7.2 Historical data querying: AVL tree
 
-`Storage/AvlTree.cs` is a self-balancing binary search tree written from scratch. After every insert or delete it checks each node on the path back to the root and, if the left and right subtree heights differ by more than one, restores balance with a single or double rotation:
+`Storage/AvlTree.cs` is a self-balancing binary search tree written from scratch (Cormen et al., 2022). After every insert or delete it checks each node on the path back to the root and, if the left and right subtree heights differ by more than one, restores balance with a single or double rotation:
 
 ```csharp
 private static Node Rebalance(Node node)
@@ -332,7 +390,7 @@ if (aboveLower && belowUpper) items.Add(node);                          // this 
 if (belowUpper) CollectRange(node.Right, from, to, items, ref visited); // right side can still match
 ```
 
-Cost is O(log n + k) for k matches. `SortedHistoryLog` keeps one `AvlTree<DateTimeOffset, HistoryPoint>` per device, so "moisture readings between 14:00 and 16:00 for Node A" first resolves Node A by MAC in the O(1) device dictionary, then asks only that node's tree. The Telemetry history panel prints the proof (counts from one real run; the microsecond figure varies by machine and is much larger on the first call because of JIT warm-up):
+Cost is O(log n + k) for k matches. `SortedHistoryLog` keeps one `AvlTree` per device, so "moisture readings between 14:00 and 16:00 for Node A" first resolves Node A by MAC in the O(1) device dictionary, then asks only that node's tree. The Telemetry history panel prints the proof (counts from one real run; the microsecond figure varies by machine and is much larger on the first call because of JIT warm-up):
 
 ```
 250 readings in window.
@@ -365,7 +423,7 @@ while (queue.Count > 0)
 
 **DFS** uses an explicit `Stack<string>` instead of recursion, so a long daisy chain of relays cannot overflow the call stack. It follows one chain to its end before backtracking.
 
-Both are O(V + E). `Connectivity()` runs a BFS from the gateway and sorts every other vertex into **connected**, **down**, or **stranded** (alive, but every path to the gateway crosses a failed node). The Reachability panel then compares each affected node's route on the healthy graph with its route on the live graph and prints the detour, for example:
+Both are O(V + E). `Connectivity()` runs a BFS from the gateway and sorts every other vertex into **connected**, **down**, or **stranded**. The Reachability panel then compares each affected node's route on the healthy graph with its route on the live graph and prints the detour, for example:
 
 ```
 ZA-SUB1-DEV3: ZA-SUB1-DEV3 > ZA-SUB1-DEV4 > ZA-SUB1-DEV1 > GATEWAY (cost 19)
@@ -410,6 +468,10 @@ if (!distance.TryGetValue(next, out var known) || candidate < known)
 
 A unit test builds the smallest case where they differ (G-A 2, G-B 2, A-B 1: the spanning tree routes B through A at cost 3, but B's direct link costs 2), and another checks on 100 random meshes that a node's shortest-path cost never exceeds its tree-route cost.
 
+### 7.5 Blazor rendering notes
+
+Razor treats the word `text` as one of its own tags, which broke the labels in the SVG mesh drawing, so each label is wrapped in a group element. Coordinates are always formatted with the invariant culture, because a culture that uses a decimal comma would otherwise produce invalid SVG.
+
 ---
 
 ## 8. Part 2 in depth: command stream
@@ -435,13 +497,15 @@ Start the API, client and simulator, then open **Command stream**.
 3. Click **Fire priority alert on selected**. A critical packet (3x the device's value) is posted to `/api/telemetry/simulate-alert` and enters the priority lane.
 4. The alert appears **immediately** at the top of the Live stream as a red row and the **Priority lane** tile ticks up, even though thousands of standard packets are still queued. The banner reports how many packets were still waiting when it was processed.
 
-Other ways to trigger one: press **S** in the simulator window, or POST a reading far outside the sensor's range to `/api/telemetry/ingest`:
+Other ways to trigger one: press **S** in the simulator window, or POST a reading far outside the sensor's range to `/api/telemetry/ingest` (the example is for Windows `cmd`; on Linux or macOS replace `^` with `\`):
 
 ```
 curl -k -X POST https://localhost:5001/api/telemetry/ingest ^
   -H "Content-Type: application/json" ^
   -d "{\"macAddress\":\"<a registered MAC>\",\"value\":9999}"
 ```
+
+Because the ingest endpoint is protected, add `-H "Authorization: Bearer <Firebase ID token>"`.
 
 #### Test 3: Stack<T> (undo)
 
@@ -498,7 +562,7 @@ confidence(context, command) = weight / (total weight for the context + 1)
 
 The "+ 1" is a prior (add-one smoothing). Two observations of the same command give a confidence of about 0.67, not 1.0, and confidence only approaches 1.0 as evidence accumulates. This also keeps learned suggestions on a sensible scale next to the cold-start rules (0.4 to 0.55).
 
-A learned pattern needs **minimum support of 1.5** recency-weighted observations: two fresh observations, or three that are one half-life old. A single one-off never qualifies. Only the best follow-up and, if it has at least half the leader's weight, one runner-up are shown, so the panel does not offer "Relay ON" and "Relay OFF" side by side because of a single stray command.
+A learned pattern needs **minimum support of 1.5** recency-weighted observations: two fresh observations, or three that are one half-life old. A single one-off never qualifies. Only the best follow-up and, if it has at least half the leader's weight, one runner-up are shown, so the panel does not offer "Relay ON" and "Relay OFF" side by side because of a single stray command. Each suggestion shows how many observations support it.
 
 Suggestion slots reserve room for the best matching search suggestion, watch-list or disconnect inspection, alert-learned action, and cold-start rule before filling remaining slots by the normal ranking. The selected suggestions are then sorted by confidence, learned before rule before watch-list, then device ID, so slot guarantees do not change the panel's top-to-bottom ranking.
 
@@ -513,7 +577,7 @@ weight(now) = weight(then) * 0.5 ^ (age / half-life)
 - **Learned patterns:** half-life of **7 days** (`ActionPatternOptions.PatternHalfLife`).
 - **Watch-list alert counts:** half-life of **6 hours** (`WatchHalfLife`). A device is "misbehaving lately", not forever.
 
-Decay is applied lazily when a pair is read or updated, so there is no background timer. The engine takes a `TimeProvider`, so the unit tests move a manual clock forward (two half-lives, 120 days) instead of waiting. Practical effects:
+Decay is applied lazily when a pair is read or updated, so there is no background timer. The engine takes a `TimeProvider` (Microsoft, n.d.l), so the unit tests move a manual clock forward (two half-lives, 120 days) instead of waiting. Practical effects:
 
 - Recent behaviour outranks old behaviour, so if the operator changes their routine, the suggestion changes with them.
 - Evidence that has decayed below 0.05 is **deleted**, and the number of contexts is capped at 200 (weakest evicted first), so memory stays bounded.
@@ -546,13 +610,13 @@ Seeded patterns are **demonstration data, not real operator history**, and the e
 - Seeding is **idempotent**: it sets the demo values instead of adding to them, so pressing the button repeatedly changes nothing.
 - Demo data decays and is pruned like everything else.
 
-To see genuinely learned behaviour without seeding: trigger an alert on a device, issue the same command within 90 s, and repeat; after minimum support is met the suggestion appears. Persisting the table to disk or a database is out of scope for this part and is listed under limitations.
+To see genuinely learned behaviour without seeding: trigger an alert on a device, issue the same command within 90 s, and repeat; after minimum support is met the suggestion appears. Persisting the table to disk or a database is out of scope and is listed under limitations.
 
 ### 8.4 Navigation, state and SignalR resilience
 
 - `NavMenu` is rendered by `MainLayout`, so it is present on every page and the active module is highlighted.
-- `LiveStateService` is an **app-lifetime singleton**. It owns the SignalR subscriptions, device statuses, command history, the live feed, and the operator's **search text, category filter, state filter and selected device**. Pages read from it instead of keeping their own copies.
-- Navigating Home, Sensor ingestion and Command stream disposes the page component but not the service, so **nothing is lost and no second hub connection is opened**.
+- `LiveStateService` is an **app-lifetime singleton**. It owns the SignalR subscriptions, device statuses, command history, the live feed, and the operator's **search text, category filter, state filter, history settings and selected device**. Pages read from it instead of keeping their own copies.
+- Navigating between Home, Sensor ingestion, Command stream and Mesh topology disposes the page component but not the service, so **nothing is lost and no second hub connection is opened**.
 - Change notifications are coalesced to at most one every 250 ms, so a burst of thousands of packets cannot freeze the browser or the render thread.
 - **Reconnection:** both `TelemetryHubClient` and `CommandHubClient` use `WithAutomaticReconnect()`. When a connection drops (for example the API restarts), the topbar shows **offline**, SignalR retries automatically, and on `Reconnected` the client re-fetches the full device list, command log and stats from the API so it cannot drift out of sync. No page refresh is needed.
 
@@ -567,8 +631,8 @@ Part 1 delivered Sensor Data Ingestion and Telemetry.
 - **Generics without boxing:** `TelemetryPacket<T> where T : struct`, closed over `float`, `int` and `bool`.
 - **Operator overloading:** `SensorReading` overloads `+`, `-`, `>`, `<`, `>=`, `<=`, `==`, `!=` for aggregation and threshold comparison.
 - **Jagged arrays to `List<T>`:** `TelemetryBatcher<T>` buffers windows into a `T[][]`, then flushes to a flat list.
-- **Recursion:** `DeploymentTreeValidator` walks the Facility, Zone, Sub-Zone, Device tree, checking MAC uniqueness and that every ancestor is configured.
-- **Anomaly Constellation:** a live radial view of every sensor with a detail panel and file attachment.
+- **Recursion:** `DeploymentTreeValidator` walks the Facility, Zone, Sub-Zone, Device tree, checking MAC uniqueness and that every ancestor is configured, and returns a list of everything that is wrong so the dashboard can tell the operator what to fix.
+- **Anomaly Constellation:** a live radial view of every sensor, grouped into arcs by zone and coloured by health, with a detail panel and file attachment. Sensors that do not match the operator's filter are dimmed, and the layout switches to a denser style once there are more than 28 sensors.
 - **Server-authoritative clear:** `SensorRegistry.ClearAllDevices()` and `RemoveDevice(id)` purge every index, the seeder re-reads the device list each tick, and the client re-syncs on SignalR reconnect, so multiple dashboards cannot drift apart.
 
 ---
@@ -632,11 +696,13 @@ All routes except the root health check and `/api/auth/config` require a Firebas
 dotnet test SmartX.Api.Tests
 ```
 
+73 tests, all passing, 19 of them for Part 3. The project uses xUnit (xUnit.net, n.d.).
+
 | Area | What is verified |
 |---|---|
 | `IngestQueueTests` | FIFO order, priority bypass, equal-urgency tie-breaking, back-pressure at the cap |
 | `CommandHistoryTests` | LIFO undo order, empty-stack undo returns nothing, **undoing an undo is not possible** (inverse commands are never pushed), undo stack cap evicts the oldest entry, audit log cap |
-| `SensorRegistryTests` / `PipelineStructuresTests` | MAC lookup and sync, duplicate-alert suppression, sorted history ordering and capacity |
+| `SensorRegistryTests` / `PipelineStructuresTests` | MAC lookup and sync, duplicate-alert suppression, history ordering and capacity |
 | `ActionPatternEngineTests` | Learned, rule-based and watch-list paths; minimum support; smoothed confidence; **decay on an injected clock** (evidence halves, then is pruned); watch-list fades; repeated searches credited once; weak runner-up hidden; demo data labelled and idempotent; removed devices purged; prefix-only search matching; stable ordering |
 | `CoreDomainTests`, `DeploymentTreeValidatorTests` | Part 1: operator overloads, jagged-array batching, recursive tree validation |
 | `Part3MeshTests` | Part 3: AVL balance on sorted input, range-query correctness and nodes visited, delete rebalancing, min-heap ordering, Prim equals Kruskal (fixed example and 100 random meshes), BFS versus DFS order, healing around a failed node, Dijkstra versus tree-route cost (fixed example and 100 random meshes), hop breakdown, stranded-node detection, deterministic topology, route lookup by MAC, history range through the service |
@@ -649,7 +715,7 @@ dotnet test SmartX.Api.Tests
 docker compose up --build
 ```
 
-Starts the API (`8080`), the client (`8081`) and the simulator. The simulator reaches the API through `SMARTX_API_URL=http://smartx-api:8080`.
+Starts the API (`8080`), the client (`8081`) and the simulator (Docker Inc., n.d.). The simulator reaches the API through `SMARTX_API_URL=http://smartx-api:8080`.
 
 **Known limitation:** the Blazor client reads its API base address from a compile-time constant in `Program.cs`, which suits local `dotnet run`. In Docker the browser must be able to reach the API on the published port, so run the stack with the API address that matches your host, or move `apiBaseAddress` into `wwwroot/appsettings.json`. For marking, the three-terminal local run in [Quick start](#2-quick-start) is the reference way to run the full system.
 
@@ -674,7 +740,7 @@ Starts the API (`8080`), the client (`8081`) and the simulator. The simulator re
 ## 14. Design trade-offs and known limitations
 
 - **In-memory state.** Registry, history, alerts and learned patterns reset on API restart. A production gateway would persist them. The data structures sit behind small classes so a store could be swapped in.
-- **Single-process, lock-based.** Each structure guards itself with a lock. That is correct and simple for one API instance. Scaling out would need a shared queue (for example a message broker) instead of in-process collections.
+- **Single-process, lock-based.** Each structure guards itself with a lock. That is correct and simple for one API instance. Scaling out would need a shared queue (for example a message broker) and a SignalR backplane instead of in-process collections.
 - **HTTP ingestion.** MQTT would be more natural on real hardware ([Overview](#1-overview)). The pipeline after the endpoint does not depend on the transport.
 - **Rolling baseline.** The z-score classifier needs a few samples before it is meaningful, so the first packets from a new device are judged by range only.
 - **Suggestions are advisory.** The engine never applies a command on its own. Every learned suggestion needs an operator click.
@@ -687,7 +753,22 @@ Starts the API (`8080`), the client (`8081`) and the simulator. The simulator re
 
 ---
 
-## 15. Rubric mapping
+## 15. Changes since Part 2
+
+Feedback on Part 2 was addressed as follows (the full ledger with commits is in [`docs/UPDATES.md`](docs/UPDATES.md)):
+
+| Part 2 feedback or gap | Change |
+|---|---|
+| Page navigation wiped the operator's selections | Device choices, filters and history settings moved into the shared `LiveStateService`, so they persist across pages ([8.4](#84-navigation-state-and-signalr-resilience)). |
+| Two readings in the same millisecond overwrote each other | History entries are now stored with a sequence number alongside the timestamp. |
+| The suggestion engine did not show its work | Each suggestion now shows how many times its command pattern has been observed ([8.3](#83-predictive-action-and-recommendation-engine)). |
+| "Coming soon" placeholder on the home screen | Replaced by a working link to **Mesh topology**. |
+| History needed time-range queries | The Part 2 `SortedDictionary` was replaced by a hand-written AVL tree, behind the same history class ([7.2](#72-historical-data-querying-avl-tree)). |
+| Part 3 requirements | Mesh graph, BFS/DFS, Prim, Kruskal, Dijkstra, min-heap and self-healing routes ([Section 7](#7-part-3-in-depth-mesh-topology-and-routing)). |
+
+---
+
+## 16. Rubric mapping
 
 ### Part 3
 
@@ -705,15 +786,15 @@ Starts the API (`8080`), the client (`8081`) and the simulator. The simulator re
 | Rubric area (marks) | Where to look |
 |---|---|
 | Main menu, navigation and state (30) | `NavMenu`, `MainLayout`, `LiveStateService`; [section 8.4](#84-navigation-state-and-signalr-resilience); Part 1 pages still work alongside Part 2 |
-| Stacks and queues (15) | `TelemetryIngestQueue`, `CommandHistory`; [section 8.2](#82-how-to-test-the-queue-and-dictionary-implementations) tests 1 to 3 |
-| Dictionaries and key-value maps (15) | `DeviceStateStore` (MAC, O(1)), `SortedHistoryLog` (timestamp order); tests 4 and 5 |
-| Sets (10) | `ActiveAlertSet`; test 6 |
+| Stacks and queues (15) | `TelemetryQueue` and `CriticalAlertQueue` (both in `TelemetryIngestQueue`), `CommandUndoStack` (in `CommandHistory`); [section 8.2](#82-how-to-test-the-queue-and-dictionary-implementations) tests 1 to 3 |
+| Dictionaries and key-value maps (15) | `DeviceRegistry` (`DeviceStateStore`, MAC, O(1)), `SensorTimeline` (`SortedHistoryLog`, timestamp order); tests 4 and 5 |
+| Sets (10) | `DisconnectedNodes` (`ActiveAlertSet`); test 6 |
 | Predictive action and suggestion engine (30) | `ActionPatternEngine`; [section 8.3](#83-predictive-action-and-recommendation-engine) |
 | GitHub, commits, collaboration, README | This repository and this README |
 
 ---
 
-## 16. Project documents
+## 17. Project documents
 
 | Document | Contents |
 |---|---|
@@ -722,3 +803,66 @@ Starts the API (`8080`), the client (`8081`) and the simulator. The simulator re
 | [`docs/UPDATES.md`](docs/UPDATES.md) | Ledger of changes made after Parts 1 and 2, with commits |
 
 The submitted PDF report contains the completion report and the technology recommendations.
+
+---
+
+## 18. Brand assets
+
+The Smart-X identity uses the dashboard's own palette: deep navy (`#0a0e13`), signal gold (`#d8a832`) and a live-node green (`#34d399`). The mark is a diamond mesh with four sensor nodes around a central hub, one of them live.
+
+<table>
+  <tr>
+    <td align="center" width="50%">
+      <img src="docs/smartx-logo.png" alt="Smart-X logo mark" width="220"><br>
+      <strong>Logo mark</strong><br>
+      <sub><code>docs/smartx-logo.png</code> (1024 x 1024, transparent corners)</sub>
+    </td>
+    <td align="center" width="50%">
+      <img src="docs/smartx-logo-wordmark.png" alt="Smart-X wordmark: SMART-X, Secure Operations Console" width="420"><br>
+      <strong>Wordmark</strong><br>
+      <sub><code>docs/smartx-logo-wordmark.png</code> (1500 x 520)</sub>
+    </td>
+  </tr>
+</table>
+
+---
+
+## 19. References
+
+Anthropic (2026) *Claude* [Large language model]. Available at: https://claude.ai (Accessed: 12 November 2026).
+
+Cormen, T.H., Leiserson, C.E., Rivest, R.L. and Stein, C. (2022) *Introduction to algorithms*. 4th edn. Cambridge, MA: MIT Press. Available at: https://mitpress.mit.edu/9780262046305/introduction-to-algorithms/ (Accessed: 12 November 2026).
+
+Docker Inc. (n.d.) *Docker Compose overview*. Available at: https://docs.docker.com/compose/ (Accessed: 12 November 2026).
+
+Google (n.d.a) *Firebase Authentication*. Available at: https://firebase.google.com/docs/auth (Accessed: 12 November 2026).
+
+Google (n.d.b) *Firebase Auth REST API*. Available at: https://firebase.google.com/docs/reference/rest/auth (Accessed: 12 November 2026).
+
+Microsoft (n.d.a) *ASP.NET Core Blazor*. Available at: https://learn.microsoft.com/en-us/aspnet/core/blazor/ (Accessed: 12 November 2026).
+
+Microsoft (n.d.b) *ASP.NET Core SignalR introduction*. Available at: https://learn.microsoft.com/en-us/aspnet/core/signalr/introduction (Accessed: 12 November 2026).
+
+Microsoft (n.d.c) *Background tasks with hosted services in ASP.NET Core*. Available at: https://learn.microsoft.com/en-us/aspnet/core/fundamentals/host/hosted-services (Accessed: 12 November 2026).
+
+Microsoft (n.d.d) *Collections and data structures*. Available at: https://learn.microsoft.com/en-us/dotnet/standard/collections/ (Accessed: 12 November 2026).
+
+Microsoft (n.d.e) *Dictionary<TKey,TValue> class*. Available at: https://learn.microsoft.com/en-us/dotnet/api/system.collections.generic.dictionary-2 (Accessed: 12 November 2026).
+
+Microsoft (n.d.f) *Enable Cross-Origin Requests (CORS) in ASP.NET Core*. Available at: https://learn.microsoft.com/en-us/aspnet/core/security/cors (Accessed: 12 November 2026).
+
+Microsoft (n.d.g) *HashSet<T> class*. Available at: https://learn.microsoft.com/en-us/dotnet/api/system.collections.generic.hashset-1 (Accessed: 12 November 2026).
+
+Microsoft (n.d.h) *Minimal APIs overview*. Available at: https://learn.microsoft.com/en-us/aspnet/core/fundamentals/minimal-apis (Accessed: 12 November 2026).
+
+Microsoft (n.d.i) *PriorityQueue<TElement,TPriority> class*. Available at: https://learn.microsoft.com/en-us/dotnet/api/system.collections.generic.priorityqueue-2 (Accessed: 12 November 2026).
+
+Microsoft (n.d.j) *Queue<T> class*. Available at: https://learn.microsoft.com/en-us/dotnet/api/system.collections.generic.queue-1 (Accessed: 12 November 2026).
+
+Microsoft (n.d.k) *Stack<T> class*. Available at: https://learn.microsoft.com/en-us/dotnet/api/system.collections.generic.stack-1 (Accessed: 12 November 2026).
+
+Microsoft (n.d.l) *TimeProvider class*. Available at: https://learn.microsoft.com/en-us/dotnet/api/system.timeprovider (Accessed: 12 November 2026).
+
+OASIS (2019) *MQTT Version 5.0*. OASIS Standard, 7 March. Available at: https://docs.oasis-open.org/mqtt/mqtt/v5.0/mqtt-v5.0.html (Accessed: 12 November 2026).
+
+xUnit.net (n.d.) *xUnit.net documentation*. Available at: https://xunit.net/ (Accessed: 12 November 2026).
