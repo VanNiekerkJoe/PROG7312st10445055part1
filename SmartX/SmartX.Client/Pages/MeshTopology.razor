@@ -248,20 +248,28 @@
             <p class="panel-title">Telemetry history <span class="cs-count">AVL tree range query</span></p>
             <div class="mesh-hist-controls">
                 <input class="cs-input" type="search" placeholder="MAC address or device ID" @bind="Live.MeshHistoryQuery" />
-                <label class="mesh-field">From (UTC)<input class="cs-input" type="datetime-local" @bind="Live.MeshHistoryFrom" /></label>
-                <label class="mesh-field">To (UTC)<input class="cs-input" type="datetime-local" @bind="Live.MeshHistoryTo" /></label>
+                <label class="mesh-field">From (UTC)<input class="cs-input" type="datetime-local" @bind="Live.MeshHistoryFrom" @bind:after="OnHistoryRangeChanged" /></label>
+                <label class="mesh-field">To (UTC)<input class="cs-input" type="datetime-local" @bind="Live.MeshHistoryTo" @bind:after="OnHistoryRangeChanged" /></label>
                 <div class="mesh-btn-row">
-                    <button class="btn btn-ghost btn-sm" @onclick="() => SetWindow(15)">Last 15 min</button>
-                    <button class="btn btn-ghost btn-sm" @onclick="() => SetWindow(60)">Last hour</button>
-                    <button class="btn btn-ghost btn-sm" @onclick="() => SetWindow(180)">Last 3 h</button>
+                    <button class="btn btn-ghost btn-sm @(Live.MeshHistoryWindowMinutes == 15 ? "mesh-window-active" : "")" aria-pressed="@(Live.MeshHistoryWindowMinutes == 15)" @onclick="() => SetWindow(15)">Last 15 min</button>
+                    <button class="btn btn-ghost btn-sm @(Live.MeshHistoryWindowMinutes == 60 ? "mesh-window-active" : "")" aria-pressed="@(Live.MeshHistoryWindowMinutes == 60)" @onclick="() => SetWindow(60)">Last hour</button>
+                    <button class="btn btn-ghost btn-sm @(Live.MeshHistoryWindowMinutes == 180 ? "mesh-window-active" : "")" aria-pressed="@(Live.MeshHistoryWindowMinutes == 180)" @onclick="() => SetWindow(180)">Last 3 hours</button>
                     <button class="btn btn-blue btn-sm" @onclick="QueryHistoryAsync" disabled="@(_busy || string.IsNullOrWhiteSpace(Live.MeshHistoryQuery))">Run query</button>
                     <button class="btn btn-amber btn-sm" @onclick="BackfillAsync" disabled="@(_busy || string.IsNullOrWhiteSpace(Live.MeshHistoryQuery))" title="Adds 1,500 synthetic readings over the last 6 hours">Backfill demo data</button>
                 </div>
             </div>
+            <p class="mesh-window-summary" role="status">
+                Current range: <strong>@CurrentWindowLabel</strong>
+                <span>@FormatUtc(Live.MeshHistoryFrom) – @FormatUtc(Live.MeshHistoryTo) UTC</span>
+            </p>
 
             @if (_history is not null)
             {
                 <div class="mesh-result @(_history.Found && _history.Matched > 0 ? "mesh-result-ok" : "mesh-result-err")">
+                    <p class="mesh-window-summary">
+                        Results: <strong>@QueriedWindowLabel</strong>
+                        <span>@FormatUtc(_history.From) – @FormatUtc(_history.To) UTC</span>
+                    </p>
                     <p class="mesh-result-msg">@_history.Message</p>
                     @if (_history.Found)
                     {
@@ -323,6 +331,7 @@
     private MeshRouteResponse? _route;
     private MeshSubnetResponse? _reach;
     private HistoryRangeResponse? _history;
+    private int? _queriedWindowMinutes;
     private List<string> _subnets = [];
     private Dictionary<string, (double X, double Y)> _pos = new(StringComparer.Ordinal);
     private List<(string Name, double X, double Y)> _subnetLabels = [];
@@ -499,6 +508,12 @@
     {
         Live.MeshHistoryTo = DateTime.UtcNow;
         Live.MeshHistoryFrom = Live.MeshHistoryTo.AddMinutes(-minutes);
+        Live.MeshHistoryWindowMinutes = minutes;
+    }
+
+    private void OnHistoryRangeChanged()
+    {
+        Live.MeshHistoryWindowMinutes = null;
     }
 
     private async Task QueryHistoryAsync()
@@ -506,9 +521,32 @@
         _busy = true;
         var from = new DateTimeOffset(DateTime.SpecifyKind(Live.MeshHistoryFrom, DateTimeKind.Utc));
         var to = new DateTimeOffset(DateTime.SpecifyKind(Live.MeshHistoryTo, DateTimeKind.Utc));
+        _queriedWindowMinutes = Live.MeshHistoryWindowMinutes;
         _history = await MeshApi.GetHistoryRangeAsync(Live.MeshHistoryQuery.Trim(), from, to, _cts.Token);
         _busy = false;
     }
+
+    private string CurrentWindowLabel => Live.MeshHistoryWindowMinutes is int minutes
+        ? WindowLabel(minutes)
+        : "Custom range";
+
+    private string QueriedWindowLabel => _queriedWindowMinutes is int minutes
+        ? WindowLabel(minutes)
+        : "Custom range";
+
+    private static string WindowLabel(int minutes) => minutes switch
+    {
+        15 => "Last 15 minutes",
+        60 => "Last hour",
+        180 => "Last 3 hours",
+        _ => $"Last {minutes} minutes"
+    };
+
+    private static string FormatUtc(DateTime value) =>
+        value.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture);
+
+    private static string FormatUtc(DateTimeOffset value) =>
+        value.UtcDateTime.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture);
 
     private async Task BackfillAsync()
     {

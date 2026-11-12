@@ -71,6 +71,7 @@ public sealed class LiveStateService : IDisposable
     public string MeshHistoryQuery { get; set; } = "";
     public DateTime MeshHistoryFrom { get; set; } = DateTime.UtcNow.AddHours(-1);
     public DateTime MeshHistoryTo { get; set; } = DateTime.UtcNow;
+    public int? MeshHistoryWindowMinutes { get; set; } = 60;
 
     public void ToggleHiddenSeverity(AnomalySeverity severity)
     {

@@ -2295,6 +2295,9 @@ a.topnav-link:hover {
 .lg-old { border-color: var(--muted); border-top-style: dashed; }
 .mesh-hint { color: var(--muted); font-size: 0.72rem; margin: 0.4rem 0 0; }
 .mesh-btn-row { display: flex; flex-wrap: wrap; gap: 0.4rem; margin: 0.6rem 0; }
+.mesh-btn-row .mesh-window-active { --btn-color: var(--accent); --btn-border: var(--accent); color: var(--text); background: color-mix(in srgb, var(--accent) 18%, transparent); }
+.mesh-window-summary { display: flex; flex-wrap: wrap; gap: 0.25rem 0.75rem; align-items: baseline; margin: 0.45rem 0; color: var(--muted); font-size: 0.72rem; }
+.mesh-window-summary strong { color: var(--accent); }
 .mesh-result { margin-top: 0.7rem; padding: 0.7rem 0.8rem; border: 1px solid var(--border-bright); border-left-width: 3px; border-radius: 4px; background: var(--panel-raised); font-size: 0.78rem; }
 .mesh-result-ok { border-left-color: var(--green); }
 .mesh-result-warn { border-left-color: var(--accent); }
