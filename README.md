@@ -12,6 +12,7 @@ A hybrid IoT monitoring platform for distributed environments (hydroponic farms,
 | Repository | https://github.com/VanNiekerkJoe/PROG7312st10445055part1 |
 | Demo video (Part 3) | `[PASTE PART 3 YOUTUBE LINK HERE]` |
 | Demo video (Part 2) | https://www.youtube.com/watch?v=2n1pi6hSRl4 |
+| Demo video (Part 1) | https://www.youtube.com/watch?v=INM5rb1z4wc |
 | Stack | .NET 10, ASP.NET Core Minimal API, SignalR, Blazor WebAssembly, Firebase Authentication, xUnit, Docker Compose |
 | Tests | 73 automated tests, all passing (19 added in Part 3) |
 | Demo login | Supplied in the submission notes (not stored in this repository, see [Configuration](#3-configuration)) |
