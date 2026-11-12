@@ -723,7 +723,7 @@ Starts the API (`8080`), the client (`8081`) and the simulator. The simulator re
 
 The submitted PDF report contains the completion report and the technology recommendations.
 
-Reference list
+## Reference list
 
 Cormen, T.H., Leiserson, C.E., Rivest, R.L. and Stein, C. (2022) Introduction to algorithms. 4th edn. Cambridge, MA: MIT Press. Available at: https://mitpress.mit.edu/9780262046305/introduction-to-algorithms/ (Accessed: 12 November 2026).
 
