@@ -39,8 +39,7 @@ A hybrid IoT monitoring platform for distributed environments (hydroponic farms,
 16. [Rubric mapping](#16-rubric-mapping)
 17. [Project documents](#17-project-documents)
 18. [Brand assets](#18-brand-assets)
-19. [AI use declaration](#19-ai-use-declaration)
-20. [References](#20-references)
+19. [References](#20-references)
 
 ---
 
@@ -828,13 +827,7 @@ The Smart-X identity uses the dashboard's own palette: deep navy (`#0a0e13`), si
 
 ---
 
-## 19. AI use declaration
-
-Claude (Anthropic, 2026) was used as an assistant during development and documentation. All code and text were reviewed, tested and adapted by the author, who is responsible for the submission.
-
----
-
-## 20. References
+## 19. References
 
 Anthropic (2026) *Claude* [Large language model]. Available at: https://claude.ai (Accessed: 12 November 2026).
 
